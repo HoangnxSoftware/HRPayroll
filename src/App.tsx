@@ -124,6 +124,7 @@ function PayrollAppContent() {
   const [isPrintPayrollOpen, setIsPrintPayrollOpen] = useState(false);
   const [isPrintSlipOpen, setIsPrintSlipOpen] = useState(false);
   const [selectedSlipEmpId, setSelectedSlipEmpId] = useState<string | undefined>(undefined);
+  const [selectedSlipEmpIds, setSelectedSlipEmpIds] = useState<string[] | undefined>(undefined);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [employeeToEdit, setEmployeeToEdit] = useState<Employee | null>(null);
 
@@ -484,8 +485,9 @@ function PayrollAppContent() {
     }
   };
 
-  const handleOpenPrintSlip = (empId?: string) => {
+  const handleOpenPrintSlip = (empId?: string, empIds?: string[]) => {
     setSelectedSlipEmpId(empId);
+    setSelectedSlipEmpIds(empIds);
     setIsPrintSlipOpen(true);
   };
 
@@ -685,6 +687,7 @@ function PayrollAppContent() {
         payrolls={payrolls}
         settings={settings}
         selectedEmployeeId={selectedSlipEmpId}
+        initialSelectedEmployeeIds={selectedSlipEmpIds}
         month={`${settings.currentMonth}/${settings.currentYear}`}
       />
 
