@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Utensils, 
   Download, 
@@ -19,7 +19,7 @@ import {
   DollarSign
 } from 'lucide-react';
 import { MealRegistration, Employee, SystemSettings, MealType, TimekeepingRecord } from '../types';
-import { formatVND } from '../utils/payrollCalculator';
+import { formatVND, getAvailableYears } from '../utils/payrollCalculator';
 import * as XLSX from 'xlsx';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintMealModal } from '../components/PrintMealModal';
@@ -45,6 +45,14 @@ export const MealView: React.FC<MealViewProps> = ({
   const currentMonthStr = `${settings.currentYear}-${String(settings.currentMonth).padStart(2, '0')}`;
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
+
+  useEffect(() => {
+    setSelectedMonth(`${settings.currentYear}-${String(settings.currentMonth).padStart(2, '0')}`);
+  }, [settings.currentYear, settings.currentMonth]);
+
+  const [selYearStr, selMonthStr] = selectedMonth.split('-');
+  const selYear = Number(selYearStr) || settings.currentYear;
+  const selMonth = Number(selMonthStr) || settings.currentMonth;
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
 
@@ -293,20 +301,39 @@ export const MealView: React.FC<MealViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Month Selector */}
+          {/* Month / Year Selector */}
           <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
             <Calendar className="w-4 h-4 text-slate-500" />
             <span className="font-semibold text-slate-700">Kỳ Quản Lý:</span>
             <select
-              value={selectedMonth}
-              onChange={e => setSelectedMonth(e.target.value)}
-              className="bg-transparent font-bold text-slate-900 focus:outline-none cursor-pointer"
+              value={selMonth}
+              onChange={e => setSelectedMonth(`${selYear}-${String(e.target.value).padStart(2, '0')}`)}
+              className="bg-transparent font-bold text-slate-900 focus:outline-none cursor-pointer pr-1"
             >
-              {monthOptions.map(opt => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                <option key={m} value={m}>Tháng {m}</option>
               ))}
+            </select>
+            <span className="text-slate-400 font-bold">/</span>
+            <select
+              value={selYear}
+              onChange={e => {
+                if (e.target.value === 'custom') {
+                  const input = window.prompt('Nhập năm quản lý ăn ca (VD: 2022, 2030):', String(selYear));
+                  const yr = parseInt(input || '', 10);
+                  if (yr >= 1990 && yr <= 2100) {
+                    setSelectedMonth(`${yr}-${String(selMonth).padStart(2, '0')}`);
+                  }
+                  return;
+                }
+                setSelectedMonth(`${Number(e.target.value)}-${String(selMonth).padStart(2, '0')}`);
+              }}
+              className="bg-transparent font-bold text-slate-900 focus:outline-none cursor-pointer pl-1"
+            >
+              {getAvailableYears(selYear).map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+              <option value="custom">+ Khác...</option>
             </select>
           </div>
 

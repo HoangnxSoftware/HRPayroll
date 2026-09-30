@@ -39,7 +39,8 @@ import {
   DEFAULT_TAX_EXEMPTION_RULES,
   calculateTaxBreakdown,
   calculateCombinedAnnualTaxReport,
-  CombinedAnnualTaxRecord
+  CombinedAnnualTaxRecord,
+  getAvailableYears
 } from '../utils/payrollCalculator';
 import { exportTaxReportToExcel, exportAnnualTaxReportToExcel } from '../utils/excelHelper';
 import { useAuthRole } from '../context/AuthRoleContext';
@@ -610,12 +611,23 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                 <span className="font-bold text-slate-600 text-[11px]">Năm quyết toán:</span>
                 <select
                   value={annualTargetYear}
-                  onChange={e => setAnnualTargetYear(Number(e.target.value))}
+                  onChange={e => {
+                    if (e.target.value === 'custom') {
+                      const input = window.prompt('Nhập năm quyết toán thuế TNCN (VD: 2022, 2030):', String(annualTargetYear));
+                      const yr = parseInt(input || '', 10);
+                      if (yr >= 1990 && yr <= 2100) {
+                        setAnnualTargetYear(yr);
+                      }
+                      return;
+                    }
+                    setAnnualTargetYear(Number(e.target.value));
+                  }}
                   className="bg-transparent font-bold text-indigo-700 focus:outline-none cursor-pointer"
                 >
-                  {[2024, 2025, 2026, 2027, 2028].map(y => (
+                  {getAvailableYears(annualTargetYear).map(y => (
                     <option key={y} value={y}>{y}</option>
                   ))}
+                  <option value="custom">+ Năm khác...</option>
                 </select>
               </div>
 

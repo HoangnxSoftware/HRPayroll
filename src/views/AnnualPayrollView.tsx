@@ -28,7 +28,8 @@ import {
   calculateEmployeePayroll, 
   formatVND, 
   isEmployeeActiveInMonth,
-  getEmployeeWorkStatusDetails 
+  getEmployeeWorkStatusDetails,
+  getAvailableYears
 } from '../utils/payrollCalculator';
 import { exportAnnualPayrollToExcel } from '../utils/excelHelper';
 import { PrintAnnualPayrollModal, AnnualEmployeeData } from '../components/PrintAnnualPayrollModal';
@@ -237,12 +238,23 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
             <label className="text-xs font-semibold text-slate-700 mr-2">Năm:</label>
             <select
               value={selectedYear}
-              onChange={e => setSelectedYear(Number(e.target.value))}
+              onChange={e => {
+                if (e.target.value === 'custom') {
+                  const input = window.prompt('Nhập năm báo cáo bảng lương (VD: 2022, 2030):', String(selectedYear));
+                  const yr = parseInt(input || '', 10);
+                  if (yr >= 1990 && yr <= 2100) {
+                    setSelectedYear(yr);
+                  }
+                  return;
+                }
+                setSelectedYear(Number(e.target.value));
+              }}
               className="bg-transparent text-sm font-bold text-slate-900 focus:outline-none cursor-pointer"
             >
-              {[2024, 2025, 2026, 2027, 2028].map(y => (
+              {getAvailableYears(selectedYear).map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
+              <option value="custom">+ Năm khác...</option>
             </select>
           </div>
 

@@ -15,6 +15,7 @@ import {
 import { SystemSettings, GoogleSyncState, UserRole, Employee } from '../types';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { UserProfileMenu } from './UserProfileMenu';
+import { getAvailableYears } from '../utils/payrollCalculator';
 
 interface NavbarProps {
   settings: SystemSettings;
@@ -99,12 +100,23 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="text-slate-400">/</span>
             <select
               value={settings.currentYear}
-              onChange={e => onMonthChange(settings.currentMonth, Number(e.target.value))}
+              onChange={e => {
+                if (e.target.value === 'custom') {
+                  const input = window.prompt('Nhập năm làm việc muốn chuyển tới (VD: 2022, 2030):', String(settings.currentYear));
+                  const yr = parseInt(input || '', 10);
+                  if (yr >= 1990 && yr <= 2100) {
+                    onMonthChange(settings.currentMonth, yr);
+                  }
+                  return;
+                }
+                onMonthChange(settings.currentMonth, Number(e.target.value));
+              }}
               className="bg-transparent border-none text-xs font-bold text-slate-900 focus:outline-none cursor-pointer pl-1"
             >
-              {[2024, 2025, 2026, 2027].map(y => (
+              {getAvailableYears(settings.currentYear).map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
+              <option value="custom">+ Năm khác...</option>
             </select>
           </div>
 

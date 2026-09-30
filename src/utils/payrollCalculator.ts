@@ -33,6 +33,26 @@ export interface EffectiveInsuranceRates {
 }
 
 /**
+ * Trả về danh sách năm làm việc khả dụng để chọn trong toàn bộ hệ thống.
+ * Mặc định hỗ trợ dải năm rộng từ 2020 đến 2035,
+ * và tự động mở rộng nếu năm đang chọn nằm ngoài khoảng này.
+ */
+export const getAvailableYears = (
+  selectedYear?: number,
+  baseStart: number = 2020,
+  baseEnd: number = 2035
+): number[] => {
+  const currentY = Number(selectedYear) || new Date().getFullYear();
+  const start = Math.min(baseStart, currentY - 2);
+  const end = Math.max(baseEnd, currentY + 3);
+  const years: number[] = [];
+  for (let y = start; y <= end; y++) {
+    years.push(y);
+  }
+  return years;
+};
+
+/**
  * Lấy tỷ lệ trích đóng BHXH có hiệu lực cho một tháng cụ thể (theo giai đoạn thiết lập trong cài đặt hệ thống)
  * Nếu quy định pháp luật thay đổi theo từng thời kỳ, hệ thống sẽ tự động áp dụng đúng tỷ lệ của giai đoạn đó.
  */

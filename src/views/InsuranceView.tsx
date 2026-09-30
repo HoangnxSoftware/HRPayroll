@@ -29,7 +29,7 @@ import {
   CalendarRange
 } from 'lucide-react';
 import { InsuranceRecord, Employee, SystemSettings, InsuranceSalaryHistory, InsuranceRatePeriod } from '../types';
-import { formatVND, isEmployeeActiveInMonth, getInsuranceRatesForMonth } from '../utils/payrollCalculator';
+import { formatVND, isEmployeeActiveInMonth, getInsuranceRatesForMonth, getAvailableYears } from '../utils/payrollCalculator';
 import * as XLSX from 'xlsx';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintInsuranceModal } from '../components/PrintInsuranceModal';
@@ -1139,12 +1139,23 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                 <span className="text-xs font-bold text-slate-700">Năm:</span>
                 <select
                   value={selectedYear}
-                  onChange={e => setSelectedYear(Number(e.target.value))}
+                  onChange={e => {
+                    if (e.target.value === 'custom') {
+                      const input = window.prompt('Nhập năm báo cáo trích nộp BHXH (VD: 2022, 2030):', String(selectedYear));
+                      const yr = parseInt(input || '', 10);
+                      if (yr >= 1990 && yr <= 2100) {
+                        setSelectedYear(yr);
+                      }
+                      return;
+                    }
+                    setSelectedYear(Number(e.target.value));
+                  }}
                   className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-purple-900 cursor-pointer focus:ring-2 focus:ring-purple-500"
                 >
-                  {[selectedYear - 2, selectedYear - 1, selectedYear, selectedYear + 1, selectedYear + 2].map(y => (
+                  {getAvailableYears(selectedYear).map(y => (
                     <option key={y} value={y}>Năm {y}</option>
                   ))}
+                  <option value="custom">+ Khác...</option>
                 </select>
               </div>
 

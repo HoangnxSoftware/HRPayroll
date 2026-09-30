@@ -33,13 +33,14 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
   const [editingItem, setEditingItem] = useState<SpecialAllowance | null>(null);
   const [importNotification, setImportNotification] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const defaultMonth = `${settings?.currentYear || 2026}-${String(settings?.currentMonth || 9).padStart(2, '0')}`;
 
   const [formData, setFormData] = useState<Partial<SpecialAllowance>>({
     employeeId: employees[0]?.id || '',
     name: 'Phụ cấp trách nhiệm',
     amount: 1000000,
     isTaxable: true,
-    month: '2026-09',
+    month: defaultMonth,
     note: ''
   });
 
@@ -67,7 +68,7 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
       name: 'Phụ cấp trách nhiệm',
       amount: 1000000,
       isTaxable: true,
-      month: '2026-09',
+      month: defaultMonth,
       note: ''
     });
     setIsModalOpen(true);
@@ -92,7 +93,7 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
       name: formData.name || '',
       amount: Number(formData.amount) || 0,
       isTaxable: Boolean(formData.isTaxable),
-      month: formData.month || '2026-09',
+      month: formData.month || defaultMonth,
       note: formData.note || ''
     };
 

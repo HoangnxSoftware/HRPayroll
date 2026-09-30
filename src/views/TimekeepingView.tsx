@@ -41,7 +41,7 @@ import {
   MealRegistration
 } from '../types';
 import { exportTimekeepingToExcel, exportMealAttendanceToExcel, exportOvertimeLogsToExcel } from '../utils/excelHelper';
-import { recalculateTimekeepingSummary, isEmployeeActiveInMonth, isMonthTimekept } from '../utils/payrollCalculator';
+import { recalculateTimekeepingSummary, isEmployeeActiveInMonth, isMonthTimekept, getAvailableYears } from '../utils/payrollCalculator';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintTimekeepingModal } from '../components/PrintTimekeepingModal';
 import { 
@@ -1076,12 +1076,23 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
                 <span className="text-slate-400 font-bold">/</span>
                 <select
                   value={selectedYear}
-                  onChange={(e) => handleSelectMonth(selectedMonth, Number(e.target.value))}
+                  onChange={(e) => {
+                    if (e.target.value === 'custom') {
+                      const input = window.prompt('Nhập năm chấm công (VD: 2022, 2030):', String(selectedYear));
+                      const yr = parseInt(input || '', 10);
+                      if (yr >= 1990 && yr <= 2100) {
+                        handleSelectMonth(selectedMonth, yr);
+                      }
+                      return;
+                    }
+                    handleSelectMonth(selectedMonth, Number(e.target.value));
+                  }}
                   className="bg-transparent text-xs font-black text-slate-900 border-none focus:outline-none cursor-pointer"
                 >
-                  {[2024, 2025, 2026, 2027, 2028].map(y => (
+                  {getAvailableYears(selectedYear).map(y => (
                     <option key={y} value={y}>{y}</option>
                   ))}
+                  <option value="custom">+ Khác...</option>
                 </select>
               </div>
 
