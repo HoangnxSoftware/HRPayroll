@@ -145,7 +145,8 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
   const totalTaxable = useMemo(() => payrolls.reduce((s, p) => s + p.taxableIncome, 0), [payrolls]);
 
   const totalOtTaxExempt = useMemo(() => payrolls.reduce((s, p) => s + p.otPayTaxExempt, 0), [payrolls]);
-  const totalMealExempt = useMemo(() => payrolls.reduce((s, p) => s + (p.mealAllowance || 0), 0), [payrolls]);
+  const mealCap = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+  const totalMealExempt = useMemo(() => payrolls.reduce((s, p) => s + (p.mealTaxExempt !== undefined ? p.mealTaxExempt : Math.min(p.mealAllowance || 0, mealCap)), 0), [payrolls, mealCap]);
   const totalExemptAllowances = useMemo(() => payrolls.reduce((s, p) => s + p.taxExemptAllowances, 0), [payrolls]);
   const totalTaxExempt = useMemo(() => totalOtTaxExempt + totalMealExempt + totalExemptAllowances, [totalOtTaxExempt, totalMealExempt, totalExemptAllowances]);
 
@@ -721,7 +722,9 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {filteredPayrolls.map((p, idx) => {
                   const emp = empMap.get(p.employeeId);
-                  const exempt = p.otPayTaxExempt + p.taxExemptAllowances + (p.mealAllowance || 0);
+                  const mealCap = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+                  const mealExempt = p.mealTaxExempt !== undefined ? p.mealTaxExempt : Math.min(p.mealAllowance || 0, mealCap);
+                  const exempt = p.otPayTaxExempt + p.taxExemptAllowances + mealExempt;
                   const breakdown = calculateTaxBreakdown(p.assessableIncome, activeBrackets);
                   const methodKey = `${currentMonthKey}_${p.employeeId}`;
                   const currentMethod: TaxCalculationMethod = settings.monthlyEmployeeTaxMethods?.[methodKey] || p.taxCalculationMethod || 'progressive';
@@ -1106,6 +1109,7 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                   <th className="px-3 py-3 text-right bg-amber-50/60 font-bold min-w-[110px]">Lương Thời Gian</th>
                   <th className="px-3 py-3 text-right bg-amber-50/60 font-bold min-w-[110px]">OT Tính Thuế (100%)</th>
                   <th className="px-3 py-3 text-right bg-amber-50/60 font-bold min-w-[110px]">Phụ Cấp Chịu Thuế</th>
+                  <th className="px-3 py-3 text-right bg-amber-50/60 font-bold min-w-[110px]">Ăn Ca Tính Thuế</th>
                   <th className="px-3 py-3 text-right bg-amber-100/70 font-black text-amber-950 min-w-[120px]">TỔNG CHỊU THUẾ</th>
                   
                   <th className="px-3 py-3 text-right bg-emerald-50/60 text-emerald-900 font-bold min-w-[110px]">OT Vượt Mức Miễn</th>
@@ -1119,7 +1123,10 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
               <tbody className="divide-y divide-slate-100 font-mono">
                 {filteredPayrolls.map((p, idx) => {
                   const emp = empMap.get(p.employeeId);
-                  const totalExempt = p.otPayTaxExempt + (p.mealAllowance || 0) + p.taxExemptAllowances;
+                  const mealCap = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+                  const mealExempt = p.mealTaxExempt !== undefined ? p.mealTaxExempt : Math.min(p.mealAllowance || 0, mealCap);
+                  const mealTaxable = p.mealTaxable !== undefined ? p.mealTaxable : Math.max(0, (p.mealAllowance || 0) - mealCap);
+                  const totalExempt = p.otPayTaxExempt + mealExempt + p.taxExemptAllowances;
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-3 py-3 text-center text-slate-400 font-sans">{idx + 1}</td>
@@ -1129,10 +1136,11 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                       <td className="px-3 py-3 text-right bg-amber-50/20">{formatVND(p.mainSalary)}</td>
                       <td className="px-3 py-3 text-right bg-amber-50/20">{formatVND(p.otPayTaxable)}</td>
                       <td className="px-3 py-3 text-right bg-amber-50/20">{formatVND(p.taxableAllowances)}</td>
+                      <td className="px-3 py-3 text-right bg-amber-50/20">{formatVND(mealTaxable)}</td>
                       <td className="px-3 py-3 text-right font-black text-amber-950 bg-amber-50/50">{formatVND(p.taxableIncome)}</td>
 
                       <td className="px-3 py-3 text-right text-emerald-800 bg-emerald-50/20">{formatVND(p.otPayTaxExempt)}</td>
-                      <td className="px-3 py-3 text-right text-emerald-800 bg-emerald-50/20">{formatVND(p.mealAllowance || 0)}</td>
+                      <td className="px-3 py-3 text-right text-emerald-800 bg-emerald-50/20">{formatVND(mealExempt)}</td>
                       <td className="px-3 py-3 text-right text-emerald-800 bg-emerald-50/20">{formatVND(p.taxExemptAllowances)}</td>
                       <td className="px-3 py-3 text-right font-black text-emerald-900 bg-emerald-50/50">{formatVND(totalExempt)}</td>
 

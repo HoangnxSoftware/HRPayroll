@@ -333,7 +333,8 @@ export const exportTaxReportToExcel = (
 
   const rows = payrolls.map((p, idx) => {
     const emp = empMap.get(p.employeeId);
-    const totalExempt = p.otPayTaxExempt + p.taxExemptAllowances + (p.mealAllowance || 0);
+    const mealExempt = p.mealTaxExempt !== undefined ? p.mealTaxExempt : (p.mealAllowance || 0);
+    const totalExempt = p.otPayTaxExempt + p.taxExemptAllowances + mealExempt;
 
     return {
       'STT': idx + 1,
@@ -347,7 +348,7 @@ export const exportTaxReportToExcel = (
       'TỔNG THU NHẬP CHỊU THUẾ': p.taxableIncome,
       // Nhóm Miễn thuế / Không chịu thuế
       'OT Vượt Mức Miễn Thuế': p.otPayTaxExempt,
-      'Tiền Ăn Ca Định Mức Miễn Thuế': p.mealAllowance || 0,
+      'Tiền Ăn Ca Định Mức Miễn Thuế': mealExempt,
       'Phụ Cấp Miễn Thuế': p.taxExemptAllowances,
       'TỔNG THU NHẬP MIỄN THUẾ': totalExempt,
       // Tổng thu nhập
@@ -784,5 +785,312 @@ export const exportAnnualInsuranceToExcel = (
   XLSX.utils.book_append_sheet(wb, ws2, `Chi_Tiet_Cac_Quy_${year}`);
 
   XLSX.writeFile(wb, `Bao_Cao_Dong_BHXH_Ca_Nam_${year}_${companyName.replace(/\s+/g, '_').slice(0, 20)}.xlsx`);
+};
+
+/**
+ * Trích xuất Nhật Ký Làm Thêm Giờ (OT) ra Excel
+ */
+export const exportOvertimeLogToExcel = (
+  timekeepings: TimekeepingRecord[],
+  employees: Employee[],
+  settings: SystemSettings,
+  month: number,
+  year: number
+) => {
+  const empMap = new Map(employees.map(e => [e.id, e]));
+  const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
+  const posMap = new Map(settings.positions.map(p => [p.id, p.name]));
+  const daysCount = new Date(year, month, 0).getDate();
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+
+  const shiftLabelMap: Record<string, string> = {
+    ca_hanh_chinh: 'Hành chính (08:00 - 17:00)',
+    ca_sang: 'Ca Sáng (06:00 - 14:00)',
+    ca_chieu: 'Ca Chiều (14:00 - 22:00)',
+    ca_toi: 'Ca Tối (18:00 - 22:00)',
+    ca_1: 'Ca 1 (06:00 - 14:00)',
+    ca_2: 'Ca 2 (14:00 - 22:00)',
+    ca_3: 'Ca 3 (22:00 - 06:00)',
+    ca_gay: 'Ca Gãy (10:00 - 14:00 & 17:00 - 21:00)'
+  };
+
+  const otRows: any[] = [];
+  let stt = 1;
+
+  timekeepings.forEach(tk => {
+    const emp = empMap.get(tk.employeeId);
+    for (let d = 1; d <= daysCount; d++) {
+      const dayData = tk.days?.[d];
+      if (!dayData) continue;
+
+      const otNormal = dayData.otNormalHours || 0;
+      const otWeekend = dayData.otWeekendHours || 0;
+      const otHoliday = dayData.otHolidayHours || 0;
+      const totalOt = otNormal + otWeekend + otHoliday;
+
+      if (totalOt > 0 || (dayData.otStartTime && dayData.otEndTime)) {
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const dayOfWeek = new Date(year, month - 1, d).getDay();
+        const dowStr = dayOfWeek === 0 ? 'Chủ nhật' : `Thứ ${dayOfWeek + 1}`;
+
+        otRows.push({
+          'STT': stt++,
+          'Ngày Thực Hiện': `${String(d).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
+          'Thứ': dowStr,
+          'Mã Nhân Viên': emp?.employeeCode || '',
+          'Họ và Tên': emp?.fullName || '',
+          'Số CCCD': emp?.idCardNumber || '',
+          'Phòng Ban': depMap.get(emp?.departmentId || '') || '',
+          'Chức Vụ': posMap.get(emp?.positionId || '') || '',
+          'Ca Làm Việc Chính': dayData.shift ? (shiftLabelMap[dayData.shift] || dayData.shift) : 'Hành chính',
+          'Khung Giờ Làm Thêm (Từ - Đến)': (dayData.otStartTime && dayData.otEndTime)
+            ? `${dayData.otStartTime} - ${dayData.otEndTime}`
+            : (totalOt > 0 ? `${totalOt} giờ` : '-'),
+          'Giờ Bắt Đầu': dayData.otStartTime || '',
+          'Giờ Kết Thúc': dayData.otEndTime || '',
+          'OT Ngày Thường (h)': otNormal,
+          'OT Cuối Tuần (h)': otWeekend,
+          'OT Ngày Lễ (h)': otHoliday,
+          'Tổng Giờ Tăng Ca (h)': totalOt,
+          'Lý Do / Nội Dung Tăng Ca': dayData.otReason || 'Hoàn thành tiến độ công việc',
+          'Suất Ăn Tăng Ca': dayData.hadMeal || dayData.mealDinner ? 'Có cơm OT' : 'Không'
+        });
+      }
+    }
+  });
+
+  const summaryRows = employees.map((emp, idx) => {
+    const tk = timekeepings.find(t => t.employeeId === emp.id && (String(t.month) === monthKey || Number(t.month) === month));
+    const otNormal = tk?.totalOtNormalHours || 0;
+    const otWeekend = tk?.totalOtWeekendHours || 0;
+    const otHoliday = tk?.totalOtHolidayHours || 0;
+    const totalOt = otNormal + otWeekend + otHoliday;
+
+    return {
+      'STT': idx + 1,
+      'Mã Nhân Viên': emp.employeeCode,
+      'Số CCCD': emp.idCardNumber || '',
+      'Họ và Tên': emp.fullName,
+      'Phòng Ban': depMap.get(emp.departmentId) || '',
+      'Chức Vụ': posMap.get(emp.positionId) || '',
+      'Số Ngày Có Làm Thêm': tk?.days ? Object.values(tk.days).filter(d => (d.otNormalHours || 0) + (d.otWeekendHours || 0) + (d.otHolidayHours || 0) > 0).length : 0,
+      'Giờ OT Thường (150%)': otNormal,
+      'Giờ OT Cuối Tuần (200%)': otWeekend,
+      'Giờ OT Ngày Lễ (300%)': otHoliday,
+      'TỔNG GIỜ LÀM THÊM (h)': totalOt,
+      'Hạn Mức Miễn Thuế Tháng (40h)': totalOt <= 40 ? 'Trong hạn mức' : `Vượt trần ${(totalOt - 40).toFixed(1)}h`,
+      'Ký Xác Nhận': ''
+    };
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.json_to_sheet(otRows.length > 0 ? otRows : [{ 'Thông Báo': 'Không có dữ liệu làm thêm giờ trong tháng' }]);
+  const ws2 = XLSX.utils.json_to_sheet(summaryRows);
+
+  XLSX.utils.book_append_sheet(wb, ws1, `Nhat_Ky_OT_Chi_Tiet_T${month}`);
+  XLSX.utils.book_append_sheet(wb, ws2, `Tong_Hop_OT_Nhan_Vien_T${month}`);
+
+  XLSX.writeFile(wb, `Nhat_Ky_Lam_Them_Gio_T${month}_${year}.xlsx`);
+};
+
+/**
+ * Trích xuất Bảng Chấm Công Ăn Ca ra Excel
+ */
+export const exportMealAttendanceToExcel = (
+  timekeepings: TimekeepingRecord[],
+  employees: Employee[],
+  mealRegistrations: MealRegistration[],
+  settings: SystemSettings,
+  month: number,
+  year: number
+) => {
+  const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
+  const tkMap = new Map(timekeepings.map(t => [t.employeeId, t]));
+  const mealMap = new Map(mealRegistrations.map(m => [m.employeeId, m]));
+  const daysCount = new Date(year, month, 0).getDate();
+
+  const exemptLimit = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+  const mealExemptMode = settings.taxExemptionRules?.mealExemptMode || 'capped';
+
+  // Sheet 1: Bảng tổng hợp ăn ca và chi phí
+  const summaryRows = employees.map((emp, idx) => {
+    const reg = mealMap.get(emp.id);
+    const tk = tkMap.get(emp.id);
+    const actualMeals = tk?.totalMeals ?? 0;
+    const effectivePlan = reg?.mealType || (reg?.planType === 'registered' ? 'canteen' : reg?.planType) || 'canteen';
+    const rate = reg?.ratePerMeal ?? reg?.customRatePerMeal ?? settings.standardMealPerDay ?? 35000;
+    const flatAmount = reg?.monthlyAllowance ?? reg?.monthlyFlatAmount ?? (settings.monthlyMealFlatRate || 1200000);
+
+    let canteenCost = 0;
+    let cashAllowance = 0;
+    let totalCost = 0;
+    let taxableCash = 0;
+    let exemptAmount = 0;
+
+    if (effectivePlan === 'canteen') {
+      canteenCost = actualMeals * rate;
+      totalCost = canteenCost;
+      exemptAmount = canteenCost;
+      taxableCash = 0;
+    } else if (effectivePlan === 'cash') {
+      cashAllowance = flatAmount;
+      totalCost = cashAllowance;
+      if (mealExemptMode === 'fully_exempt') {
+        exemptAmount = cashAllowance;
+        taxableCash = 0;
+      } else if (mealExemptMode === 'fully_taxable') {
+        exemptAmount = 0;
+        taxableCash = cashAllowance;
+      } else {
+        exemptAmount = Math.min(cashAllowance, exemptLimit);
+        taxableCash = Math.max(0, cashAllowance - exemptLimit);
+      }
+    }
+
+    return {
+      'STT': idx + 1,
+      'Mã Nhân Viên': emp.employeeCode,
+      'Số CCCD': emp.idCardNumber || '',
+      'Họ và Tên': emp.fullName,
+      'Phòng Ban': depMap.get(emp.departmentId) || '',
+      'Hình Thức Ăn': effectivePlan === 'canteen' ? 'Ăn tại bếp' : effectivePlan === 'cash' ? 'Chi tiền mặt' : 'Không ăn',
+      'Đơn Giá / Suất (đ)': effectivePlan === 'canteen' ? rate : 0,
+      'Số Bữa Trưa (suất)': tk?.totalMealsLunch || 0,
+      'Số Bữa Chiều (suất)': tk?.totalMealsAfternoon || 0,
+      'Số Bữa Tối (suất)': tk?.totalMealsDinner || 0,
+      'Tổng Suất Thực Ăn': actualMeals,
+      'Tiền Ăn Căng Tin (VNĐ)': canteenCost,
+      'Tiền Mặt Chi Trả (VNĐ)': cashAllowance,
+      'Tổng Chi Phí Ăn Ca (VNĐ)': totalCost,
+      'Phần Miễn Thuế TNCN (VNĐ)': exemptAmount,
+      [`Chịu Thuế (Vượt ${new Intl.NumberFormat('vi-VN').format(exemptLimit)}đ)`]: taxableCash,
+      'Ghi Chú': reg?.note || ''
+    };
+  });
+
+  // Sheet 2: Chi tiết chấm ăn ca từng ngày (1 -> 31)
+  const gridRows = employees.map((emp, idx) => {
+    const tk = tkMap.get(emp.id);
+    const rowObj: any = {
+      'STT': idx + 1,
+      'Mã Nhân Viên': emp.employeeCode,
+      'Họ và Tên': emp.fullName,
+      'Phòng Ban': depMap.get(emp.departmentId) || ''
+    };
+
+    for (let d = 1; d <= daysCount; d++) {
+      const dayData = tk?.days?.[d];
+      let dayVal = '';
+      if (dayData) {
+        const parts: string[] = [];
+        if (dayData.mealLunch) parts.push('Trưa');
+        if (dayData.mealAfternoon) parts.push('Chiều');
+        if (dayData.mealDinner) parts.push('Tối');
+        dayVal = parts.length > 0 ? parts.join('+') : (dayData.hadMeal || dayData.mealEaten ? '1' : '-');
+      } else {
+        dayVal = '-';
+      }
+      rowObj[`Ngày ${d}`] = dayVal;
+    }
+
+    rowObj['Tổng Số Suất'] = tk?.totalMeals || 0;
+    return rowObj;
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.json_to_sheet(summaryRows);
+  const ws2 = XLSX.utils.json_to_sheet(gridRows);
+
+  XLSX.utils.book_append_sheet(wb, ws1, `Tong_Hop_An_Ca_T${month}`);
+  XLSX.utils.book_append_sheet(wb, ws2, `Cham_Cong_An_Ca_Chi_Tiet_T${month}`);
+
+  XLSX.writeFile(wb, `Bang_Cham_Cong_An_Ca_T${month}_${year}.xlsx`);
+};
+
+/**
+ * Trích xuất Nhật Ký Làm Thêm Giờ (OT Chi Tiết) ra Excel
+ */
+export const exportOvertimeLogsToExcel = (
+  timekeepings: TimekeepingRecord[],
+  employees: Employee[],
+  settings: SystemSettings,
+  month: number,
+  year: number
+) => {
+  const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const rows: any[] = [];
+  let stt = 1;
+
+  employees.forEach(emp => {
+    const tk = timekeepings.find(t => 
+      t.employeeId === emp.id && (
+        String(t.month) === `${year}-${String(month).padStart(2, '0')}` ||
+        (Number(t.month) === month && (!t.year || t.year === year)) ||
+        (!t.month && month === settings.currentMonth && year === settings.currentYear)
+      )
+    );
+    if (!tk) return;
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dayData = tk.days?.[d];
+      if (!dayData) continue;
+
+      const otNormal = dayData.otNormalHours || 0;
+      const otWeekend = dayData.otWeekendHours || 0;
+      const otHoliday = dayData.otHolidayHours || 0;
+      const totalOt = otNormal + otWeekend + otHoliday;
+
+      // Chỉ xuất các ngày có làm thêm giờ (hoặc nếu người dùng muốn xuất tất cả các ca có OT)
+      if (totalOt <= 0 && !dayData.otStartTime && !dayData.otReason) continue;
+
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const dayOfWeek = new Date(year, month - 1, d).getDay();
+      const dayNames = ['Chủ nhật', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy'];
+      const dayOfWeekStr = dayNames[dayOfWeek];
+
+      const otTypeLabel = dayData.otType === 'holiday' || otHoliday > 0
+        ? 'Ngày Lễ Tết (300%)'
+        : dayData.otType === 'weekend' || otWeekend > 0
+        ? 'Ngày Nghỉ Tuần / CN (200%)'
+        : 'Ngày Thường (150%)';
+
+      const shiftLabel = dayData.shift === 'ca_sang' ? 'Ca sáng' :
+                         dayData.shift === 'ca_chieu' ? 'Ca chiều' :
+                         dayData.shift === 'ca_1' ? 'Ca 1' :
+                         dayData.shift === 'ca_2' ? 'Ca 2' :
+                         dayData.shift === 'ca_3' ? 'Ca 3 (Đêm)' : 'Ca hành chính';
+
+      const isNight = dayData.shift === 'ca_3' || 
+                      (dayData.otStartTime && dayData.otStartTime >= '22:00') || 
+                      (dayData.otEndTime && dayData.otEndTime <= '06:00');
+
+      rows.push({
+        'STT': stt++,
+        'Ngày': dateStr,
+        'Thứ': dayOfWeekStr,
+        'Mã Nhân Viên': emp.employeeCode,
+        'Số CCCD': emp.idCardNumber || '—',
+        'Họ và Tên': emp.fullName,
+        'Phòng Ban': depMap.get(emp.departmentId) || '',
+        'Ký Hiệu Công': dayData.symbol || 'X',
+        'Ca Làm Việc': shiftLabel,
+        'Giờ Bắt Đầu OT': dayData.otStartTime || '—',
+        'Giờ Kết Thúc OT': dayData.otEndTime || '—',
+        'Số Giờ Tăng Ca (h)': totalOt,
+        'Loại Tăng Ca': otTypeLabel,
+        'Tăng Ca Đêm (22h - 6h)': isNight ? 'Có' : 'Không',
+        'Nội Dung / Lý Do Làm Thêm': dayData.otReason || 'Hoàn thành tiến độ công việc',
+        'Suất Ăn Ca': (dayData.hadMeal || dayData.mealLunch || dayData.mealAfternoon || dayData.mealDinner) ? 'Có' : 'Không'
+      });
+    }
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [{
+    'Thông báo': `Không có dữ liệu làm thêm giờ (OT) trong tháng ${month}/${year}`
+  }]);
+  XLSX.utils.book_append_sheet(wb, ws, `Nhat_Ky_OT_T${month}`);
+  XLSX.writeFile(wb, `Nhat_Ky_Lam_Them_Gio_OT_T${month}_${year}.xlsx`);
 };
 

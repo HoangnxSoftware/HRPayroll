@@ -28,7 +28,8 @@ import {
   CalendarDays,
   RotateCcw,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  ChevronDown
 } from 'lucide-react';
 import { 
   TimekeepingRecord, 
@@ -39,7 +40,7 @@ import {
   WorkShift,
   MealRegistration
 } from '../types';
-import { exportTimekeepingToExcel } from '../utils/excelHelper';
+import { exportTimekeepingToExcel, exportMealAttendanceToExcel, exportOvertimeLogsToExcel } from '../utils/excelHelper';
 import { recalculateTimekeepingSummary, isEmployeeActiveInMonth } from '../utils/payrollCalculator';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintTimekeepingModal } from '../components/PrintTimekeepingModal';
@@ -79,6 +80,9 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
   const [filterShift, setFilterShift] = useState<string>('all');
   const [filterOnlyOt, setFilterOnlyOt] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [printModalMode, setPrintModalMode] = useState<'general' | 'overtime' | 'meals'>('general');
+  const [showPrintDropdown, setShowPrintDropdown] = useState(false);
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
 
   // Chọn tháng & năm để xem và cập nhật bảng chấm công
   const [selectedMonth, setSelectedMonth] = useState<number>(settings.currentMonth);
@@ -964,9 +968,24 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
     setIsBatchShiftModalOpen(false);
   };
 
+  const handleOpenPrintModal = (mode: 'general' | 'overtime' | 'meals' = 'general') => {
+    setPrintModalMode(mode);
+    setIsPrintModalOpen(true);
+  };
+
   const handleExportExcel = () => {
     const listToExport = filteredEmployees.map(e => getEmployeeTimekeeping(e.id));
     exportTimekeepingToExcel(listToExport, employees, year, month);
+  };
+
+  const handleExportOvertimeExcel = () => {
+    const listToExport = filteredEmployees.map(e => getEmployeeTimekeeping(e.id));
+    exportOvertimeLogsToExcel(listToExport, filteredEmployees, settings, month, year);
+  };
+
+  const handleExportMealAttendanceExcel = () => {
+    const listToExport = filteredEmployees.map(e => getEmployeeTimekeeping(e.id));
+    exportMealAttendanceToExcel(listToExport, filteredEmployees, mealRegistrations || [], settings, month, year);
   };
 
   // Lấy danh sách các dòng chi tiết ca và OT cho Tab 2
@@ -1229,24 +1248,127 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
           )}
 
           {canExportData && (
-            <>
-              <button
-                onClick={() => setIsPrintModalOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
-                title="In bảng chấm công và theo dõi tăng ca"
-              >
-                <Printer className="w-4 h-4 text-emerald-600" />
-                <span>In Bảng Chấm Công</span>
-              </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Menu In Báo Cáo */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowPrintDropdown(!showPrintDropdown);
+                    setShowExportDropdown(false);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-semibold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs"
+                  title="In bảng chấm công, nhật ký làm thêm giờ, chấm công ăn ca"
+                >
+                  <Printer className="w-4 h-4 text-emerald-600" />
+                  <span>In Báo Cáo Chấm Công</span>
+                  <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform ${showPrintDropdown ? 'rotate-180' : ''}`} />
+                </button>
 
-              <button
-                onClick={handleExportExcel}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
-              >
-                <Download className="w-4 h-4 text-emerald-600" />
-                <span>Xuất Bảng Công & OT (Excel)</span>
-              </button>
-            </>
+                {showPrintDropdown && (
+                  <div className="absolute right-0 mt-1.5 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-30 py-1.5 text-xs animate-in fade-in slide-in-from-top-1">
+                    <button
+                      onClick={() => {
+                        handleOpenPrintModal('general');
+                        setShowPrintDropdown(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2.5 text-slate-800 cursor-pointer font-medium"
+                    >
+                      <CalendarCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div>
+                        <div className="font-bold text-slate-900">1. In Bảng Chấm Công Tháng</div>
+                        <div className="text-[10px] text-slate-400">Khổ A4 Ngang chuẩn biểu mẫu đầy đủ ngày 1..31</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleOpenPrintModal('overtime');
+                        setShowPrintDropdown(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-orange-50 flex items-center gap-2.5 text-slate-800 cursor-pointer font-medium border-t border-slate-100"
+                    >
+                      <Clock className="w-4 h-4 text-orange-600 shrink-0" />
+                      <div>
+                        <div className="font-bold text-orange-950">2. In Nhật Ký Làm Thêm Giờ</div>
+                        <div className="text-[10px] text-slate-400">Chi tiết giờ bắt đầu, kết thúc, số giờ OT và chữ ký</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleOpenPrintModal('meals');
+                        setShowPrintDropdown(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-teal-50 flex items-center gap-2.5 text-slate-800 cursor-pointer font-medium border-t border-slate-100"
+                    >
+                      <Utensils className="w-4 h-4 text-teal-600 shrink-0" />
+                      <div>
+                        <div className="font-bold text-teal-950">3. In Bảng Chấm Công Ăn Ca</div>
+                        <div className="text-[10px] text-slate-400">Theo dõi suất ăn trưa, chiều, tối cả tháng</div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Menu Xuất Excel */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowExportDropdown(!showExportDropdown);
+                    setShowPrintDropdown(false);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold text-xs rounded-xl transition-colors cursor-pointer shadow-2xs"
+                  title="Trích xuất các bảng dữ liệu chấm công sang file Excel"
+                >
+                  <Download className="w-4 h-4 text-emerald-600" />
+                  <span>Xuất Excel</span>
+                  <ChevronDown className={`w-3.5 h-3.5 text-emerald-600 transition-transform ${showExportDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showExportDropdown && (
+                  <div className="absolute right-0 mt-1.5 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-30 py-1.5 text-xs animate-in fade-in slide-in-from-top-1">
+                    <button
+                      onClick={() => {
+                        handleExportExcel();
+                        setShowExportDropdown(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-emerald-50 flex items-center gap-2.5 text-slate-800 cursor-pointer font-medium"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div>
+                        <div className="font-bold text-slate-900">1. Xuất Bảng Công & OT (Excel)</div>
+                        <div className="text-[10px] text-slate-400">Tổng hợp ngày công, làm thêm giờ và nghỉ phép</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleExportOvertimeExcel();
+                        setShowExportDropdown(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-orange-50 flex items-center gap-2.5 text-slate-800 cursor-pointer font-medium border-t border-slate-100"
+                    >
+                      <Clock className="w-4 h-4 text-orange-600 shrink-0" />
+                      <div>
+                        <div className="font-bold text-orange-950">2. Xuất Excel Nhật Ký Làm Thêm Giờ</div>
+                        <div className="text-[10px] text-slate-400">Trích xuất chi tiết nhật ký OT từng ngày của nhân viên</div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleExportMealAttendanceExcel();
+                        setShowExportDropdown(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-teal-50 flex items-center gap-2.5 text-slate-800 cursor-pointer font-medium border-t border-slate-100"
+                    >
+                      <Utensils className="w-4 h-4 text-teal-600 shrink-0" />
+                      <div>
+                        <div className="font-bold text-teal-950">3. Xuất Excel Bảng Chấm Công Ăn Ca</div>
+                        <div className="text-[10px] text-slate-400">Chi tiết ngày 1..31 và tổng hợp chi phí suất ăn</div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -1647,9 +1769,31 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
                 Xem chi tiết ca làm việc, giờ bắt đầu và kết thúc làm thêm (OT) của từng nhân viên theo từng ngày
               </p>
             </div>
-            <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-3 py-1 rounded-lg">
-              Tổng cộng: <strong>{overtimeLogs.length}</strong> lượt ca ghi nhận
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-xl">
+                Tổng cộng: <strong>{overtimeLogs.length}</strong> lượt ca ghi nhận
+              </span>
+              {canExportData && (
+                <>
+                  <button
+                    onClick={() => handleOpenPrintModal('overtime')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer"
+                    title="In nhật ký làm thêm giờ (A4 Landscape chuẩn biểu mẫu kèm chữ ký)"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-orange-600" />
+                    <span>In Nhật Ký Làm Thêm Giờ</span>
+                  </button>
+                  <button
+                    onClick={handleExportOvertimeExcel}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer"
+                    title="Trích xuất file Excel nhật ký làm thêm giờ"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Xuất Excel Nhật Ký OT</span>
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -1861,6 +2005,27 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
                   <div className="bg-slate-100 px-2.5 py-1.5 rounded-xl text-slate-700 text-xs">
                     👥 Người ăn: <strong className="font-bold">{dayMealStats.employeesWithMeal}/{filteredEmployees.length}</strong>
                   </div>
+
+                  {canExportData && (
+                    <div className="flex items-center gap-1.5 ml-auto">
+                      <button
+                        onClick={() => handleOpenPrintModal('meals')}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer"
+                        title="In Bảng Chấm Công Ăn Ca (Khổ A4 Ngang có đầy đủ ngày 1..31 và tổng số suất)"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-teal-600" />
+                        <span>In Bảng Chấm Công Ăn Ca</span>
+                      </button>
+                      <button
+                        onClick={handleExportMealAttendanceExcel}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer"
+                        title="Xuất file Excel Bảng Chấm Công Ăn Ca (gồm Sheet chi tiết 1..31 và Sheet tổng hợp chi phí)"
+                      >
+                        <Download className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Xuất Excel Chấm Công Ăn Ca</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -3075,8 +3240,10 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
         timekeepings={timekeepings}
         employees={employees}
         settings={settings}
+        mealRegistrations={mealRegistrations}
         customMonth={month}
         customYear={year}
+        initialMode={printModalMode}
       />
     </div>
   );

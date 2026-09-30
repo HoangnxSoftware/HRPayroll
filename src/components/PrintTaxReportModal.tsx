@@ -33,9 +33,10 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
   const totalTaxableIncome = payrolls.reduce((sum, p) => sum + p.taxableIncome, 0);
 
   const totalOtTaxExempt = payrolls.reduce((sum, p) => sum + p.otPayTaxExempt, 0);
-  const totalMealExempt = payrolls.reduce((sum, p) => sum + (p.mealAllowance || 0), 0);
+  const mealCap = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+  const totalMealExempt = payrolls.reduce((sum, p) => sum + (p.mealTaxExempt !== undefined ? p.mealTaxExempt : Math.min(p.mealAllowance || 0, mealCap)), 0);
   const totalExemptAllowances = payrolls.reduce((sum, p) => sum + p.taxExemptAllowances, 0);
-  const totalTaxExemptIncome = payrolls.reduce((sum, p) => sum + (p.otPayTaxExempt + p.taxExemptAllowances + (p.mealAllowance || 0)), 0);
+  const totalTaxExemptIncome = payrolls.reduce((sum, p) => sum + (p.otPayTaxExempt + p.taxExemptAllowances + (p.mealTaxExempt !== undefined ? p.mealTaxExempt : Math.min(p.mealAllowance || 0, mealCap))), 0);
 
   const totalGross = payrolls.reduce((sum, p) => sum + p.grossIncome, 0);
 
@@ -195,7 +196,9 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
                 <tbody>
                   {payrolls.map((p, idx) => {
                     const emp = empMap.get(p.employeeId);
-                    const exempt = p.otPayTaxExempt + p.taxExemptAllowances + (p.mealAllowance || 0);
+                    const mealCap = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+                    const mealExempt = p.mealTaxExempt !== undefined ? p.mealTaxExempt : Math.min(p.mealAllowance || 0, mealCap);
+                    const exempt = p.otPayTaxExempt + p.taxExemptAllowances + mealExempt;
                     const breakdown = calculateTaxBreakdown(p.assessableIncome, settings.taxBrackets);
 
                     return (
@@ -223,7 +226,7 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
                           {p.otPayTaxExempt > 0 ? formatVND(p.otPayTaxExempt) : '-'}
                         </td>
                         <td className="border border-slate-400 p-1 text-right font-mono bg-emerald-50/40 text-emerald-800">
-                          {p.mealAllowance > 0 ? formatVND(p.mealAllowance) : '-'}
+                          {mealExempt > 0 ? formatVND(mealExempt) : '-'}
                         </td>
                         <td className="border border-slate-400 p-1 text-right font-mono bg-emerald-50/40 text-emerald-800">
                           {p.taxExemptAllowances > 0 ? formatVND(p.taxExemptAllowances) : '-'}
@@ -319,7 +322,7 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
                 ? 'Miễn thuế toàn bộ tiền ăn ca chi bằng tiền'
                 : exRules?.mealExemptMode === 'fully_taxable'
                 ? 'Tính thuế toàn bộ tiền ăn ca chi bằng tiền'
-                : `Tiền ăn ca chi bằng tiền mặt được miễn thuế tối đa ${formatVND(exRules?.mealExemptMonthlyCap || 730000)}/tháng (phần vượt mức tính vào thu nhập chịu thuế)`;
+                : `Tiền ăn ca chi bằng tiền mặt được miễn thuế tối đa ${formatVND(exRules?.mealExemptMonthlyCap || settings.monthlyMealFlatRate || 1200000)}/tháng (phần vượt mức tính vào thu nhập chịu thuế)`;
 
               const uniformDesc = exRules?.uniformExemptMode === 'fully_exempt'
                 ? 'Miễn thuế toàn bộ phụ cấp trang phục'

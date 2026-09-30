@@ -5,7 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/HRPayroll/',
+    base: process.env.GITHUB_ACTIONS ? '/HRPayroll/' : './',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

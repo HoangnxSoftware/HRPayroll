@@ -405,8 +405,10 @@ export interface PayrollRecord {
   
   // 3. Phụ cấp
   taxableAllowances: number; // Tổng phụ cấp CHỊU thuế TNCN (trách nhiệm, chuyên cần, kiêm nhiệm...)
-  taxExemptAllowances: number; // Tổng phụ cấp MIỄN thuế TNCN (ăn trưa trong định mức, xăng xe, điện thoại theo quy chế, độc hại...)
-  mealAllowance: number; // Tiền ăn trưa/ăn ca (nếu chi tiền mặt)
+  taxExemptAllowances: number; // Tổng phụ cấp MIỄN thuế TNCN (xăng xe, điện thoại, trang phục, độc hại...)
+  mealAllowance: number; // Tiền ăn trưa/ăn ca chi tiền mặt
+  mealTaxExempt?: number; // Tiền ăn ca MIỄN thuế TNCN (trong định mức)
+  mealTaxable?: number; // Tiền ăn ca CHỊU thuế TNCN (vượt định mức nếu có)
   
   // 4. Tổng thu nhập (Gross)
   grossIncome: number; // = Lương chính + Tổng OT + Tổng phụ cấp

@@ -640,6 +640,24 @@ export const calculateEmployeePayroll = (
     const isPhone = alw.allowanceType === 'phone' || nameLower.includes('điện thoại') || nameLower.includes('liên lạc');
     const isTravel = alw.allowanceType === 'travel_gas' || nameLower.includes('xăng') || nameLower.includes('đi lại') || nameLower.includes('công tác');
 
+    const isMealAllowance = (alw as any).allowanceType === 'meal' ||
+                            nameLower.includes('ăn ca') || 
+                            nameLower.includes('tiền ăn') || 
+                            nameLower.includes('ăn trưa') || 
+                            nameLower.includes('phụ cấp ăn') || 
+                            nameLower.includes('tiền cơm') ||
+                            nameLower.includes('bữa ăn') ||
+                            nameLower.includes('cơm trưa') ||
+                            nameLower.includes('ăn giữa ca') ||
+                            nameLower.includes('hỗ trợ ăn') ||
+                            nameLower.includes('suất ăn');
+
+    if (isMealAllowance) {
+      // Phụ cấp ăn ca đã có cơ chế quản lý riêng tại Mục 5 (Đăng ký ăn ca & Mức trần miễn thuế TNCN)
+      // Tuyệt đối không tính trùng vào taxExemptAllowances hay taxableAllowances của phụ cấp khác
+      return;
+    }
+
     if (isUniform) {
       if (otRules.uniformExemptMode === 'fully_exempt') {
         taxExemptAllowances += alw.amount;
@@ -693,38 +711,47 @@ export const calculateEmployeePayroll = (
     }
   });
   
-  // 5. Tiền ăn ca / ăn trưa: Mức trần chuyển từ 720.000/730.000 thành 1.200.000 đ/tháng
+  // 5. Tiền ăn ca / ăn trưa: Mức trần theo cài đặt hệ thống & quy định thuế TNCN
   let mealAllowance = 0;
+  let mealTaxExempt = 0;
+  let mealTaxable = 0;
   let mealDeduction = 0;
-  const mealPlan = mealReg?.planType || 'none';
+  const mealPlan = mealReg?.planType || (mealReg?.mealType === 'cash' ? 'cash' : mealReg?.mealType === 'registered' ? 'registered' : 'none');
   
-  if (mealPlan === 'cash') {
-    const flatAmount = mealReg?.monthlyFlatAmount ?? (settings?.monthlyMealFlatRate || 1200000);
+  // Tìm xem trong bảng phụ cấp đặc thù có khoản nào là tiền ăn ca không
+  const mealAllowanceFromSpecial = allowances.find(alw => {
+    const n = (alw.name || '').toLowerCase();
+    return (alw as any).allowanceType === 'meal' ||
+           n.includes('ăn ca') || n.includes('tiền ăn') || n.includes('ăn trưa') || n.includes('phụ cấp ăn') || n.includes('tiền cơm') || n.includes('bữa ăn') || n.includes('cơm trưa') || n.includes('ăn giữa ca') || n.includes('hỗ trợ ăn') || n.includes('suất ăn');
+  });
+
+  if (mealPlan === 'cash' || (!mealReg && mealAllowanceFromSpecial)) {
+    const flatAmount = mealReg?.monthlyFlatAmount ?? mealReg?.monthlyAllowance ?? mealAllowanceFromSpecial?.amount ?? (settings?.monthlyMealFlatRate || 1200000);
     mealAllowance = flatAmount;
     
     if (otRules.mealExemptMode === 'fully_exempt') {
-      taxExemptAllowances += mealAllowance;
+      mealTaxExempt = mealAllowance;
+      mealTaxable = 0;
     } else if (otRules.mealExemptMode === 'fully_taxable') {
-      taxableAllowances += mealAllowance;
+      mealTaxExempt = 0;
+      mealTaxable = mealAllowance;
     } else {
-      // Capped: Mức tối đa miễn thuế theo quy định chuyển thành 1,200,000 đ/tháng
-      const maxExempt = otRules.mealExemptMonthlyCap ?? (settings?.monthlyMealFlatRate || 1200000);
-      if (mealAllowance <= maxExempt) {
-        taxExemptAllowances += mealAllowance;
-      } else {
-        taxExemptAllowances += maxExempt;
-        taxableAllowances += (mealAllowance - maxExempt);
-      }
+      // Capped: Mức tối đa miễn thuế theo quy định trong cài đặt hệ thống (ưu tiên cài đặt người dùng, mặc định 1.200.000)
+      const maxExempt = otRules.mealExemptMonthlyCap ?? settings?.monthlyMealFlatRate ?? 1200000;
+      mealTaxExempt = Math.min(mealAllowance, maxExempt);
+      mealTaxable = Math.max(0, mealAllowance - maxExempt);
     }
-  } else if (mealPlan === 'registered') {
-    // Ăn tại bếp: miễn thuế toàn bộ bữa ăn cung cấp trực tiếp
-    const mealPrice = mealReg?.customRatePerMeal ?? settings.standardMealPerDay;
+  } else if (mealPlan === 'registered' || mealPlan === 'canteen') {
+    // Ăn tại bếp: doanh nghiệp tổ chức bữa ăn trực tiếp được miễn thuế toàn bộ bữa ăn
+    const mealPrice = mealReg?.customRatePerMeal ?? mealReg?.ratePerMeal ?? settings.standardMealPerDay;
     const mealsCount = timekeeping?.totalMeals || 0;
     const mealCost = mealsCount * mealPrice;
+    // Bữa ăn do doanh nghiệp trực tiếp tổ chức/nấu ăn không cộng vào Gross tiền mặt của NLĐ
   }
   
   // 6. Tổng thu nhập (Gross Income)
-  const grossIncome = mainSalary + totalOtPay + taxableAllowances + taxExemptAllowances;
+  // Tổng Gross = Lương chính + Tổng OT + Phụ cấp chịu thuế + Phụ cấp miễn thuế + Tiền ăn ca chi tiền mặt
+  const grossIncome = mainSalary + totalOtPay + taxableAllowances + taxExemptAllowances + mealAllowance;
   
   // 7. Bảo hiểm xã hội
   let insuranceSalary = 0;
@@ -802,8 +829,9 @@ export const calculateEmployeePayroll = (
   const dependentDeduction = dependentCount * (settings?.dependentDeduction || 6200000);
   
   // Thu nhập chịu thuế = Gross - Thu nhập miễn thuế
-  // Thu nhập miễn thuế bao gồm: OT phần được miễn (otPayTaxExempt), phụ cấp miễn thuế (taxExemptAllowances)
-  const taxableIncome = Math.max(0, grossIncome - otPayTaxExempt - taxExemptAllowances);
+  // Thu nhập miễn thuế bao gồm: OT phần được miễn (otPayTaxExempt), phụ cấp miễn thuế (taxExemptAllowances), tiền ăn ca phần được miễn (mealTaxExempt)
+  const totalTaxExempt = otPayTaxExempt + taxExemptAllowances + mealTaxExempt;
+  const taxableIncome = Math.max(0, grossIncome - totalTaxExempt);
   
   // Các khoản giảm trừ tính thuế = Bản thân + Người phụ thuộc + BHXH cá nhân đóng
   const totalDeductionsForTax = personalDeduction + dependentDeduction + totalInsuranceEmp;
@@ -877,6 +905,8 @@ export const calculateEmployeePayroll = (
     taxableAllowances,
     taxExemptAllowances,
     mealAllowance,
+    mealTaxExempt,
+    mealTaxable,
     grossIncome,
     insuranceSalary,
     socialInsuranceEmp,

@@ -26,20 +26,29 @@ export const PrintMealModal: React.FC<PrintMealModalProps> = ({
   const tkMap = new Map(timekeepings.map(t => [t.employeeId, t]));
   const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
 
+  const mealExemptLimit = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+  const mealExemptMode = settings.taxExemptionRules?.mealExemptMode || 'capped';
+  const taxableHeaderLabel = mealExemptMode === 'fully_taxable' 
+    ? 'Chịu Thuế (100%)' 
+    : mealExemptMode === 'fully_exempt' 
+    ? 'Miễn Thuế (100%)' 
+    : `Chịu Thuế (Vượt ${formatVND(mealExemptLimit)})`;
+
   const rows = employees.map((emp, idx) => {
     const reg = mealMap.get(emp.id) || {
       id: `meal-${emp.id}`,
       employeeId: emp.id,
       mealType: 'canteen',
-      ratePerMeal: 30000,
-      monthlyAllowance: 730000
+      ratePerMeal: settings.standardMealPerDay || 35000,
+      monthlyAllowance: settings.monthlyMealFlatRate || 1200000
     };
     const tk = tkMap.get(emp.id);
     const actualMeals = tk?.totalMeals ?? tk?.actualWorkDays ?? 22;
 
+    const defaultAllowance = settings.monthlyMealFlatRate || 1200000;
     const effectiveMealType = reg.mealType || (reg.planType === 'registered' ? 'canteen' : reg.planType) || 'canteen';
-    const effectiveRate = reg.ratePerMeal ?? reg.customRatePerMeal ?? 30000;
-    const effectiveAllowance = reg.monthlyAllowance ?? reg.monthlyFlatAmount ?? 730000;
+    const effectiveRate = reg.ratePerMeal ?? reg.customRatePerMeal ?? settings.standardMealPerDay ?? 35000;
+    const effectiveAllowance = reg.monthlyAllowance ?? reg.monthlyFlatAmount ?? defaultAllowance;
 
     let canteenCost = 0;
     let cashAllowance = 0;
@@ -53,9 +62,26 @@ export const PrintMealModal: React.FC<PrintMealModalProps> = ({
       totalCost = cashAllowance;
     }
 
-    const exemptLimit = 730000;
-    const taxableCash = effectiveMealType === 'cash' ? Math.max(0, cashAllowance - exemptLimit) : 0;
-    const exemptAmount = effectiveMealType === 'canteen' ? canteenCost : Math.min(cashAllowance, exemptLimit);
+    const exemptLimit = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+    const mealExemptMode = settings.taxExemptionRules?.mealExemptMode || 'capped';
+    
+    let taxableCash = 0;
+    let exemptAmount = 0;
+    if (effectiveMealType === 'canteen') {
+      taxableCash = 0;
+      exemptAmount = canteenCost;
+    } else if (effectiveMealType === 'cash') {
+      if (mealExemptMode === 'fully_exempt') {
+        taxableCash = 0;
+        exemptAmount = cashAllowance;
+      } else if (mealExemptMode === 'fully_taxable') {
+        taxableCash = cashAllowance;
+        exemptAmount = 0;
+      } else {
+        taxableCash = Math.max(0, cashAllowance - exemptLimit);
+        exemptAmount = Math.min(cashAllowance, exemptLimit);
+      }
+    }
 
     return {
       idx: idx + 1,
@@ -160,7 +186,7 @@ export const PrintMealModal: React.FC<PrintMealModalProps> = ({
                   Ngày in: {new Date().toLocaleDateString('vi-VN')}
                 </div>
                 <div className="text-[10px] text-emerald-800 font-bold mt-0.5">
-                  Định mức miễn thuế: 730.000 đ/người/tháng
+                  Định mức miễn thuế: {mealExemptMode === 'fully_exempt' ? 'Miễn thuế toàn bộ' : mealExemptMode === 'fully_taxable' ? 'Chịu thuế toàn bộ' : `${formatVND(mealExemptLimit)}/tháng`}
                 </div>
               </div>
             </div>
@@ -210,7 +236,7 @@ export const PrintMealModal: React.FC<PrintMealModalProps> = ({
                     <th className="border border-slate-400 p-1 text-right min-w-[90px]">Tiền Ăn Căng Tin</th>
                     <th className="border border-slate-400 p-1 text-right min-w-[90px]">Tiền Mặt Chi Trả</th>
                     <th className="border border-slate-400 p-1 text-right min-w-[90px]">Tổng Chi Phí</th>
-                    <th className="border border-slate-400 p-1 text-right min-w-[80px]">Chịu Thuế (Vượt 730k)</th>
+                    <th className="border border-slate-400 p-1 text-right min-w-[85px]">{taxableHeaderLabel}</th>
                     <th className="border border-slate-400 p-1 w-24">Ký Nhận</th>
                   </tr>
                 </thead>
