@@ -104,8 +104,6 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
           continue;
         }
 
-        activeMonthsCount++;
-
         // Tìm hồ sơ công/bảo hiểm/phụ cấp/ăn ca của tháng m
         const monthStr = `${selectedYear}-${String(m).padStart(2, '0')}`;
         const tk = timekeepings.find(t => 
@@ -139,6 +137,10 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
           0,
           timekeepings
         );
+
+        if (payroll.grossIncome > 0) {
+          activeMonthsCount++;
+        }
 
         monthlyNet[m] = payroll.netSalary;
         totalBaseSalaryYear += payroll.baseSalary;

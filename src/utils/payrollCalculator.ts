@@ -446,6 +446,33 @@ export const calculatePersonalIncomeTax = (
 };
 
 /**
+ * Kiểm tra xem một tháng cụ thể đã được chấm công / được cập nhật bảng chấm công hay chưa.
+ * Những tháng đã được chấm công, được cập nhật bảng chấm công là những tháng có dấu chấm xanh
+ * để phân biệt những tháng chưa chấm.
+ * Những tháng chưa chấm sẽ để trống phần hiển thị và không tự động tính lương/thuế ảo.
+ */
+export const isMonthTimekept = (
+  timekeepings: TimekeepingRecord[] = [],
+  month: number,
+  year: number
+): boolean => {
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+  return timekeepings.some(t => {
+    const tMonthStr = String(t.month || '');
+    const matchesMonth = tMonthStr === monthKey ||
+      (tMonthStr.includes('-') && tMonthStr === monthKey) ||
+      (Number(t.month) === month && (!t.year || t.year === year)) ||
+      (!t.month && month === 9 && year === 2026);
+    
+    if (!matchesMonth) return false;
+
+    // Phải có dữ liệu công, ngày làm, lễ, phép, suất ăn hoặc OT thực tế
+    const hasDays = t.days && Object.values(t.days).some(d => !!d.symbol || (d.hours && d.hours > 0) || d.hadMeal);
+    return (t.actualWorkDays > 0) || ((t.totalMeals || 0) > 0) || (t.totalPaidDays > 0) || (t.holidayDays > 0) || (t.paidLeaveDays > 0) || !!hasDays;
+  });
+};
+
+/**
  * Tính chi tiết bảng thanh toán lương cho một nhân viên trong tháng
  */
 export const calculateEmployeePayroll = (
@@ -502,6 +529,83 @@ export const calculateEmployeePayroll = (
 
   const standardDays = getStandardWorkDaysForMonth(settings, parsedYear, parsedMonth);
   const standardHours = settings?.standardWorkHoursPerDay || 8;
+
+  // Kiểm tra tháng có được chấm công / cập nhật bảng chấm công hay không
+  const hasTkData = !!timekeeping && (
+    (timekeeping.actualWorkDays !== undefined && timekeeping.actualWorkDays > 0) ||
+    (timekeeping.totalPaidDays !== undefined && timekeeping.totalPaidDays > 0) ||
+    (timekeeping.holidayDays !== undefined && timekeeping.holidayDays > 0) ||
+    (timekeeping.paidLeaveDays !== undefined && timekeeping.paidLeaveDays > 0) ||
+    (timekeeping.days !== undefined && Object.values(timekeeping.days).some(d => !!d.symbol || (d.hours && d.hours > 0)))
+  );
+
+  const monthIsRecorded = hasTkData || (allTimekeepings && allTimekeepings.length > 0 && isMonthTimekept(allTimekeepings, parsedMonth, parsedYear));
+
+  // 1. Tính mức lương theo ngày và giờ
+  const dailyRate = employee.salaryBasis === 'daily'
+    ? employee.baseSalary
+    : (standardDays > 0 ? (employee.baseSalary / standardDays) : 0);
+  const standardHourlyRate = dailyRate / (standardHours || 8);
+  const appliedHourlyRate = (employee.salaryBasis === 'hourly' && employee.hourlyRate && employee.hourlyRate > 0)
+    ? employee.hourlyRate
+    : (employee.salaryBasis === 'hourly' ? (employee.baseSalary > 0 ? employee.baseSalary : standardHourlyRate) : standardHourlyRate);
+
+  // Nếu tháng chưa được chấm công, chưa được cập nhật bảng chấm công:
+  // Không tự động tính toán lương, phụ cấp, bảo hiểm và thuế TNCN (trả về 0)
+  if (!monthIsRecorded) {
+    const monthKey = `${parsedYear}-${String(parsedMonth).padStart(2, '0')}`;
+    return {
+      id: `pr-${employee.id}-${monthKey}`,
+      employeeId: employee.id,
+      month: monthKey,
+      standardDays,
+      actualPaidDays: 0,
+      actualWorkDays: 0,
+      actualWorkHours: 0,
+      hourlyRateApplied: appliedHourlyRate,
+      salaryBasis: employee.salaryBasis,
+      baseSalary: employee.baseSalary,
+      mainSalary: 0,
+      otPayTaxable: 0,
+      otPayTaxExempt: 0,
+      otHoursTotal: 0,
+      otHoursEligible: 0,
+      otHoursExcess: 0,
+      priorYearOtHours: 0,
+      taxableAllowances: 0,
+      taxExemptAllowances: 0,
+      mealAllowance: 0,
+      mealTaxExempt: 0,
+      mealTaxable: 0,
+      grossIncome: 0,
+      insuranceSalary: 0,
+      socialInsuranceEmp: 0,
+      healthInsuranceEmp: 0,
+      unempInsuranceEmp: 0,
+      totalInsuranceEmp: 0,
+      socialInsuranceEmployer: 0,
+      healthInsuranceEmployer: 0,
+      unempInsuranceEmployer: 0,
+      tradeUnionEmployer: 0,
+      totalInsuranceEmployer: 0,
+      personalDeduction: 0,
+      dependentCount: dependents.length,
+      dependentDeduction: 0,
+      totalDeductionsForTax: 0,
+      taxableIncome: 0,
+      assessableIncome: 0,
+      personalIncomeTax: 0,
+      taxCalculationMethod: (employee as any).taxCalculationMethod || 'progressive',
+      taxWithholdingRateApplied: (employee as any).customTaxRate,
+      advancePayment: advanceAmount,
+      mealDeduction: 0,
+      tradeUnionEmp: 0,
+      otherDeductions: otherDeductionAmount,
+      netSalary: 0,
+      paymentStatus: 'draft'
+    };
+  }
+
   const actualPaidDays = timekeeping?.totalPaidDays ?? (timekeeping ? (timekeeping.actualWorkDays + timekeeping.paidLeaveDays + timekeeping.holidayDays) : standardDays);
 
   // Tính tổng số giờ làm việc thực tế (giờ làm việc chính)
@@ -518,15 +622,6 @@ export const calculateEmployeePayroll = (
       actualWorkHours = actualPaidDays * standardHours;
     }
   }
-
-  // 1. Tính mức lương theo ngày và giờ
-  const dailyRate = employee.salaryBasis === 'daily'
-    ? employee.baseSalary
-    : (standardDays > 0 ? (employee.baseSalary / standardDays) : 0);
-  const standardHourlyRate = dailyRate / (standardHours || 8);
-  const appliedHourlyRate = (employee.salaryBasis === 'hourly' && employee.hourlyRate && employee.hourlyRate > 0)
-    ? employee.hourlyRate
-    : (employee.salaryBasis === 'hourly' ? (employee.baseSalary > 0 ? employee.baseSalary : standardHourlyRate) : standardHourlyRate);
 
   // 2. Tính lương chính theo công thức chuẩn:
   let mainSalary = 0;
@@ -1287,7 +1382,7 @@ export const calculateCombinedAnnualTaxReport = (
         totalInsuranceDeductionYear += payroll.totalInsuranceEmp;
       });
 
-      if (hasActiveInMonth) {
+      if (hasActiveInMonth && monthGross > 0) {
         activeMonthsCount++;
       }
 

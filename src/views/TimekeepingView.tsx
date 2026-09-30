@@ -41,7 +41,7 @@ import {
   MealRegistration
 } from '../types';
 import { exportTimekeepingToExcel, exportMealAttendanceToExcel, exportOvertimeLogsToExcel } from '../utils/excelHelper';
-import { recalculateTimekeepingSummary, isEmployeeActiveInMonth } from '../utils/payrollCalculator';
+import { recalculateTimekeepingSummary, isEmployeeActiveInMonth, isMonthTimekept } from '../utils/payrollCalculator';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintTimekeepingModal } from '../components/PrintTimekeepingModal';
 import { 
@@ -208,80 +208,30 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
     return false;
   };
 
+  // Kiểm tra tháng hiện tại đã được chấm công / cập nhật bảng chấm công hay chưa (có dấu chấm xanh)
+  const isMonthRecorded = useMemo(() => {
+    return isMonthTimekept(timekeepings, month, year);
+  }, [timekeepings, month, year]);
+
   // Helper: Tìm hoặc khởi tạo bảng chấm công chuẩn cho nhân viên theo tháng đang chọn
   const getEmployeeTimekeeping = (empId: string): TimekeepingRecord => {
     const found = timekeepings.find(t => t.employeeId === empId && isRecordForMonth(t, month, year));
     if (found) return found;
 
-    // Tự động khởi tạo cấu trúc chấm công chuẩn cho tháng được chọn nếu chưa có dữ liệu
-    const emp = empMap.get(empId);
-    const defaultShift: WorkShift = emp?.positionId === 'pos-cn' ? 'ca_1' : 'ca_hanh_chinh';
-    const shiftHours = getShiftInfo(defaultShift).standardHours;
-    const empMealReg = mealRegistrations?.find(m => m.employeeId === empId && (m.month === monthKey || !m.month));
-
+    // NẾU THÁNG CHƯA ĐƯỢC CHẤM CÔNG (CHƯA CẬP NHẬT BẢNG CHẤM CÔNG): ĐỂ TRỐNG PHẦN HIỂN THỊ
+    // Tuyệt đối không tự động điền 'X', giờ làm, suất ăn khi kỳ công chưa thực hiện chấm công
     const days: Record<number, DayAttendance> = {};
-    let actualWorkDays = 0;
-    let holidayDays = 0;
-    let totalMeals = 0;
-    let totalMealsLunch = 0;
-    let totalMealsAfternoon = 0;
-    let totalMealsDinner = 0;
-
     for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      const dayOfWeek = new Date(year, month - 1, d).getDay();
-      const isHol = settings.holidays.some(h => h.date === dateStr);
-      const isSun = dayOfWeek === 0;
-      const isSat = dayOfWeek === 6;
-
-      let isOff = isSun;
-      if (settings.fixedDaysOffPolicy === 'all_weekends' && isSat) {
-        isOff = true;
-      } else if (settings.fixedDaysOffPolicy === 'sundays_and_half_saturdays' && isSat && (d > 7 && d <= 14 || d > 21 && d <= 28)) {
-        isOff = true;
-      }
-
-      let symbol: AttendanceSymbol = '';
-      let hours = 0;
-      let shiftVal: WorkShift | undefined = undefined;
-      let hadMeal = false;
-      let mLunch = false;
-      let mAfternoon = false;
-      let mDinner = false;
-
-      if (isHol) {
-        symbol = 'L';
-        hours = 8;
-        holidayDays++;
-      } else if (isOff) {
-        symbol = '';
-        hours = 0;
-      } else {
-        symbol = 'X';
-        hours = shiftHours;
-        shiftVal = defaultShift;
-        actualWorkDays += 1;
-        mLunch = empMealReg?.registerLunch !== false;
-        mAfternoon = !!empMealReg?.registerAfternoon;
-        mDinner = !!empMealReg?.registerDinner;
-        hadMeal = mLunch || mAfternoon || mDinner;
-        if (mLunch) totalMealsLunch++;
-        if (mAfternoon) totalMealsAfternoon++;
-        if (mDinner) totalMealsDinner++;
-        if (hadMeal) totalMeals++;
-      }
-
       days[d] = {
-        symbol,
-        shift: shiftVal,
-        hours,
+        symbol: '',
+        hours: 0,
         otNormalHours: 0,
         otWeekendHours: 0,
         otHolidayHours: 0,
-        hadMeal,
-        mealLunch: mLunch,
-        mealAfternoon: mAfternoon,
-        mealDinner: mDinner
+        hadMeal: false,
+        mealLunch: false,
+        mealAfternoon: false,
+        mealDinner: false
       };
     }
 
@@ -291,19 +241,19 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
       year,
       month: monthKey,
       days,
-      actualWorkDays,
+      actualWorkDays: 0,
       paidLeaveDays: 0,
-      holidayDays,
+      holidayDays: 0,
       unpaidLeaveDays: 0,
       insuranceLeaveDays: 0,
-      totalPaidDays: actualWorkDays + holidayDays,
+      totalPaidDays: 0,
       totalOtNormalHours: 0,
       totalOtWeekendHours: 0,
       totalOtHolidayHours: 0,
-      totalMeals,
-      totalMealsLunch,
-      totalMealsAfternoon,
-      totalMealsDinner
+      totalMeals: 0,
+      totalMealsLunch: 0,
+      totalMealsAfternoon: 0,
+      totalMealsDinner: 0
     };
   };
 
@@ -1164,11 +1114,7 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
             {Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
               const isSelected = m === selectedMonth;
               const isSystemCurrent = m === settings.currentMonth && year === settings.currentYear;
-              const mKey = `${year}-${String(m).padStart(2, '0')}`;
-              const hasRecordedData = timekeepings.some(t => 
-                (String(t.month) === mKey || (Number(t.month) === m && (!t.year || t.year === year))) &&
-                (t.actualWorkDays > 0 || (t.totalMeals || 0) > 0)
-              );
+              const hasRecordedData = isMonthTimekept(timekeepings, m, year);
 
               return (
                 <button
@@ -1568,6 +1514,35 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
         </div>
       </div>
 
+      {/* Banner thông báo tháng chưa chấm công */}
+      {!isMonthRecorded && (
+        <div className="p-4 bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-black text-sm text-amber-900">
+                Kỳ công Tháng {month}/{year} chưa được chấm công (chưa cập nhật dữ liệu)
+              </div>
+              <p className="text-amber-800 text-xs mt-0.5">
+                Bảng chấm công của tháng này đang để trống theo đúng quy định. Bạn có thể nhấn <strong>"Tự Động Chấm Công Chuẩn"</strong> để tự động điền lịch công chuẩn hoặc chấm công từng ngày, sau đó nhấn <strong>"Cập Nhật Bảng Chấm Công"</strong> để lưu và đồng bộ sang Bảng lương & Báo cáo thuế.
+              </p>
+            </div>
+          </div>
+          {canEditTimekeeping && (
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+              <button
+                type="button"
+                onClick={handleAutoFillMonth}
+                className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Tự Động Chấm Công Chuẩn</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* VIEW 1: MONTHLY GRID VIEW */}
       {activeSubTab === 'grid' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -1682,7 +1657,7 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
                                 symbol === 'CT' ? 'bg-teal-100 text-teal-800' : 'text-slate-300'
                               }`}>
                                 <span className="font-extrabold text-[11px] leading-tight">
-                                  {symbol || '-'}
+                                  {symbol || ''}
                                 </span>
                                 
                                 {/* Badge ca làm việc */}
@@ -1715,36 +1690,40 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
 
                         {/* Summary columns */}
                         <td className="p-2 font-bold text-slate-800 bg-emerald-50/50 border-l-2 border-slate-300">
-                          {tk?.actualWorkDays || 0}
+                          {isMonthRecorded ? (tk?.actualWorkDays || 0) : ''}
                         </td>
                         <td className="p-2 font-medium text-blue-700 bg-blue-50/40">
-                          {tk?.paidLeaveDays || 0}
+                          {isMonthRecorded ? (tk?.paidLeaveDays || 0) : ''}
                         </td>
                         <td className="p-2 font-medium text-amber-700 bg-amber-50/40">
-                          {tk?.holidayDays || 0}
+                          {isMonthRecorded ? (tk?.holidayDays || 0) : ''}
                         </td>
                         <td className="p-2 font-black text-emerald-800 bg-emerald-100/70 text-xs font-mono">
-                          {tk?.totalPaidDays || 0}
+                          {isMonthRecorded ? (tk?.totalPaidDays || 0) : ''}
                         </td>
                         <td className="p-2 font-mono text-orange-700 font-semibold bg-orange-50/30">
-                          {tk?.totalOtNormalHours ? `${tk.totalOtNormalHours}h` : '-'}
+                          {isMonthRecorded && tk?.totalOtNormalHours ? `${tk.totalOtNormalHours}h` : ''}
                         </td>
                         <td className="p-2 font-mono text-orange-700 font-semibold bg-orange-50/30">
-                          {tk?.totalOtWeekendHours ? `${tk.totalOtWeekendHours}h` : '-'}
+                          {isMonthRecorded && tk?.totalOtWeekendHours ? `${tk.totalOtWeekendHours}h` : ''}
                         </td>
                         <td className="p-2 font-mono text-orange-700 font-semibold bg-orange-50/30">
-                          {tk?.totalOtHolidayHours ? `${tk.totalOtHolidayHours}h` : '-'}
+                          {isMonthRecorded && tk?.totalOtHolidayHours ? `${tk.totalOtHolidayHours}h` : ''}
                         </td>
                         <td 
                           className="p-2 font-mono text-teal-800 bg-teal-50/40 text-center"
-                          title={`Tổng cộng: ${tk?.totalMeals || 0} suất ăn (Trưa: ${tk?.totalMealsLunch || 0} | Chiều: ${tk?.totalMealsAfternoon || 0} | Tối: ${tk?.totalMealsDinner || 0})`}
+                          title={isMonthRecorded ? `Tổng cộng: ${tk?.totalMeals || 0} suất ăn (Trưa: ${tk?.totalMealsLunch || 0} | Chiều: ${tk?.totalMealsAfternoon || 0} | Tối: ${tk?.totalMealsDinner || 0})` : 'Chưa chấm công'}
                         >
-                          <div className="font-black">{tk?.totalMeals || 0}</div>
-                          {((tk?.totalMealsLunch || 0) + (tk?.totalMealsAfternoon || 0) + (tk?.totalMealsDinner || 0) > 0) && (
-                            <div className="text-[9px] text-teal-700 font-normal leading-tight mt-0.5">
-                              T:{tk?.totalMealsLunch || 0} C:{tk?.totalMealsAfternoon || 0} Đ:{tk?.totalMealsDinner || 0}
-                            </div>
-                          )}
+                          {isMonthRecorded ? (
+                            <>
+                              <div className="font-black">{tk?.totalMeals || 0}</div>
+                              {((tk?.totalMealsLunch || 0) + (tk?.totalMealsAfternoon || 0) + (tk?.totalMealsDinner || 0) > 0) && (
+                                <div className="text-[9px] text-teal-700 font-normal leading-tight mt-0.5">
+                                  T:{tk?.totalMealsLunch || 0} C:{tk?.totalMealsAfternoon || 0} Đ:{tk?.totalMealsDinner || 0}
+                                </div>
+                              )}
+                            </>
+                          ) : ''}
                         </td>
                       </tr>
                     );

@@ -16,6 +16,7 @@ import {
   User,
   TrendingUp,
   AlertTriangle,
+  AlertCircle,
   CheckSquare,
   Square
 } from 'lucide-react';
@@ -178,6 +179,23 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Banner thông báo tháng chưa chấm công */}
+      {totalGross === 0 && payrolls.length > 0 && (
+        <div className="p-4 bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-black text-sm text-amber-900">
+                Tháng {settings.currentMonth}/{settings.currentYear} chưa được chấm công
+              </div>
+              <p className="text-amber-800 text-xs mt-0.5">
+                Bảng thanh toán lương tháng này chưa phát sinh ngày công thực tế (Tổng Gross = 0 đ). Vui lòng chuyển sang mục <strong>"Bảng Chấm Công"</strong> để thực hiện chấm công và nhấn <strong>"Cập Nhật Bảng Chấm Công"</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
