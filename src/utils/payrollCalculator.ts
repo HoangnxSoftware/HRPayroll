@@ -611,6 +611,8 @@ export const calculateEmployeePayroll = (
       personalDeduction: 0,
       dependentCount: dependents.length,
       dependentDeduction: 0,
+      otherTaxDeduction: 0,
+      otherTaxDeductionNote: '',
       totalDeductionsForTax: 0,
       taxableIncome: 0,
       assessableIncome: 0,
@@ -948,12 +950,21 @@ export const calculateEmployeePayroll = (
   const totalTaxExempt = otPayTaxExempt + taxExemptAllowances + mealTaxExempt;
   const taxableIncome = Math.max(0, grossIncome - totalTaxExempt);
   
-  // Các khoản giảm trừ tính thuế = Bản thân + Người phụ thuộc + BHXH cá nhân đóng
-  const totalDeductionsForTax = personalDeduction + dependentDeduction + totalInsuranceEmp;
+  // Các khoản giảm trừ khác (Từ thiện, nhân đạo, khuyến học, hưu trí tự nguyện...)
+  const normalizedMonthKey = `${parsedYear}-${String(parsedMonth).padStart(2, '0')}`;
+  const deductionKey = `${normalizedMonthKey}_${employee.id}`;
+  const fallbackKey = `${currentMonthStr}_${employee.id}`;
+  const otherTaxDeductionItem = settings?.monthlyOtherTaxDeductions?.[deductionKey] || settings?.monthlyOtherTaxDeductions?.[fallbackKey];
+  const otherTaxDeduction = otherTaxDeductionItem ? (Number(otherTaxDeductionItem.amount) || 0) : 0;
+  const otherTaxDeductionNote = otherTaxDeductionItem?.note || '';
+
+  // Các khoản giảm trừ tính thuế = Bản thân + Người phụ thuộc + BHXH cá nhân đóng + Các khoản giảm trừ khác
+  const totalDeductionsForTax = personalDeduction + dependentDeduction + totalInsuranceEmp + otherTaxDeduction;
   
   // 8.1 Phương thức tính thuế TNCN (Lũy tiến 5 bậc hoặc Khấu trừ % tại nguồn)
-  const methodKey = `${currentMonthStr}_${employee.id}`;
-  const taxCalculationMethod: TaxCalculationMethod = settings?.monthlyEmployeeTaxMethods?.[methodKey] || settings?.defaultTaxMethod || 'progressive';
+  const methodKey = `${normalizedMonthKey}_${employee.id}`;
+  const fallbackMethodKey = `${currentMonthStr}_${employee.id}`;
+  const taxCalculationMethod: TaxCalculationMethod = settings?.monthlyEmployeeTaxMethods?.[methodKey] || settings?.monthlyEmployeeTaxMethods?.[fallbackMethodKey] || settings?.defaultTaxMethod || 'progressive';
   
   let assessableIncome = 0;
   let personalIncomeTax = 0;
@@ -1036,6 +1047,8 @@ export const calculateEmployeePayroll = (
     personalDeduction,
     dependentCount,
     dependentDeduction,
+    otherTaxDeduction,
+    otherTaxDeductionNote,
     totalDeductionsForTax,
     taxableIncome,
     assessableIncome,
@@ -1252,6 +1265,8 @@ export interface AnnualTaxMonthDetail {
   deductions: number;
   taxWithheld: number;
   taxMethod: TaxCalculationMethod;
+  otherTaxDeduction?: number;
+  otherTaxDeductionNote?: string;
 }
 
 export interface CombinedAnnualTaxRecord {
@@ -1276,7 +1291,8 @@ export interface CombinedAnnualTaxRecord {
   totalPersonalDeductionYear: number;
   totalDependentDeductionYear: number;
   totalInsuranceDeductionYear: number;
-  totalDeductionsYear: number;
+  totalOtherTaxDeductionYear: number; // Tổng các khoản giảm trừ khác cả năm (từ thiện, nhân đạo, khuyến học, hưu trí...)
+  totalDeductionsYear: number; // = Bản thân + NPT + BHXH + Giảm trừ khác
   
   totalAssessableIncomeYear: number;
   totalTaxWithheldYear: number; // Tổng số thuế TNCN bị khấu trừ cả năm (Tổng 12 tháng)
@@ -1336,6 +1352,7 @@ export const calculateCombinedAnnualTaxReport = (
     let totalPersonalDeductionYear = 0;
     let totalDependentDeductionYear = 0;
     let totalInsuranceDeductionYear = 0;
+    let totalOtherTaxDeductionYear = 0;
     let totalTaxWithheldYear = 0;
     let activeMonthsCount = 0;
 
@@ -1346,6 +1363,8 @@ export const calculateCombinedAnnualTaxReport = (
       let monthAssessable = 0;
       let monthDeductions = 0;
       let monthTaxWithheld = 0;
+      let monthOtherDeductions = 0;
+      let monthOtherDeductionNote = '';
       let hasActiveInMonth = false;
       let primaryMethod: TaxCalculationMethod = 'progressive';
 
@@ -1400,6 +1419,12 @@ export const calculateCombinedAnnualTaxReport = (
         totalPersonalDeductionYear += payroll.personalDeduction;
         totalDependentDeductionYear += payroll.dependentDeduction;
         totalInsuranceDeductionYear += payroll.totalInsuranceEmp;
+        const otherDed = payroll.otherTaxDeduction || 0;
+        totalOtherTaxDeductionYear += otherDed;
+        monthOtherDeductions += otherDed;
+        if (payroll.otherTaxDeductionNote) {
+          monthOtherDeductionNote = payroll.otherTaxDeductionNote;
+        }
       });
 
       if (hasActiveInMonth && monthGross > 0) {
@@ -1414,7 +1439,9 @@ export const calculateCombinedAnnualTaxReport = (
         assessableIncome: monthAssessable,
         deductions: monthDeductions,
         taxWithheld: monthTaxWithheld,
-        taxMethod: primaryMethod
+        taxMethod: primaryMethod,
+        otherTaxDeduction: monthOtherDeductions,
+        otherTaxDeductionNote: monthOtherDeductionNote
       };
 
       totalGrossIncomeYear += monthGross;
@@ -1427,8 +1454,8 @@ export const calculateCombinedAnnualTaxReport = (
       return;
     }
 
-    // Tổng các khoản giảm trừ cả năm
-    const totalDeductionsYear = totalPersonalDeductionYear + totalDependentDeductionYear + totalInsuranceDeductionYear;
+    // Tổng các khoản giảm trừ cả năm (bao gồm Bản thân + NPT + BHXH + Các khoản giảm trừ khác)
+    const totalDeductionsYear = totalPersonalDeductionYear + totalDependentDeductionYear + totalInsuranceDeductionYear + totalOtherTaxDeductionYear;
     
     // Thu nhập tính thuế cả năm = max(0, Tổng thu nhập chịu thuế cả năm - Tổng giảm trừ cả năm)
     const totalAssessableIncomeYear = Math.max(0, totalTaxableIncomeYear - totalDeductionsYear);
@@ -1458,6 +1485,7 @@ export const calculateCombinedAnnualTaxReport = (
       totalPersonalDeductionYear,
       totalDependentDeductionYear,
       totalInsuranceDeductionYear,
+      totalOtherTaxDeductionYear,
       totalDeductionsYear,
       totalAssessableIncomeYear,
       totalTaxWithheldYear,

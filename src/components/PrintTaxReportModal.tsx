@@ -44,6 +44,7 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
   const totalDependentCount = payrolls.reduce((sum, p) => sum + p.dependentCount, 0);
   const totalDependentDeduction = payrolls.reduce((sum, p) => sum + p.dependentDeduction, 0);
   const totalInsuranceDeduction = payrolls.reduce((sum, p) => sum + p.totalInsuranceEmp, 0);
+  const totalOtherTaxDeduction = payrolls.reduce((sum, p) => sum + (p.otherTaxDeduction || 0), 0);
   const totalDeductions = payrolls.reduce((sum, p) => sum + p.totalDeductionsForTax, 0);
 
   const totalAssessableIncome = payrolls.reduce((sum, p) => sum + p.assessableIncome, 0);
@@ -121,7 +122,7 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
             </div>
 
             {/* Summary Highlights */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 my-4 p-3 bg-slate-50 border border-slate-300 rounded-lg text-xs print:text-[10px]">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 my-4 p-3 bg-slate-50 border border-slate-300 rounded-lg text-xs print:text-[10px]">
               <div>
                 <span className="text-slate-500 block">Tổng số người lao động:</span>
                 <strong className="text-slate-900 font-bold">{employees.length} người</strong> (Có {totalTaxPayers} người phát sinh nộp thuế)
@@ -133,6 +134,15 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
               <div>
                 <span className="text-emerald-700 block font-semibold">Thu nhập không chịu thuế (Miễn thuế):</span>
                 <strong className="text-emerald-800 font-mono font-bold">{formatVND(totalTaxExemptIncome)}</strong>
+              </div>
+              <div>
+                <span className="text-blue-700 block font-semibold">Tổng các khoản giảm trừ:</span>
+                <strong className="text-blue-800 font-mono font-bold">{formatVND(totalDeductions)}</strong>
+                {totalOtherTaxDeduction > 0 && (
+                  <span className="block text-[9px] text-blue-600 font-normal">
+                    (gồm {formatVND(totalOtherTaxDeduction)} giảm trừ khác)
+                  </span>
+                )}
               </div>
               <div className="bg-red-50 p-1.5 rounded border border-red-200">
                 <span className="text-red-700 block font-semibold">TỔNG THUẾ TNCN PHẢI KHẤU TRỪ:</span>
@@ -150,7 +160,7 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
                     <th colSpan={4} className="border border-slate-400 p-1 bg-amber-100 text-amber-950">II. CÁC KHOẢN CHỊU THUẾ</th>
                     <th colSpan={4} className="border border-slate-400 p-1 bg-emerald-100 text-emerald-950">III. CÁC KHOẢN KHÔNG CHỊU THUẾ (MIỄN THUẾ)</th>
                     <th className="border border-slate-400 p-1 bg-slate-300 text-slate-950">IV. TỔNG TN</th>
-                    <th colSpan={4} className="border border-slate-400 p-1 bg-blue-100 text-blue-950">V. CÁC KHOẢN GIẢM TRỪ</th>
+                    <th colSpan={5} className="border border-slate-400 p-1 bg-blue-100 text-blue-950">V. CÁC KHOẢN GIẢM TRỪ</th>
                     <th colSpan={3} className="border border-slate-400 p-1 bg-red-100 text-red-950">VI. NGHĨA VỤ THUẾ TNCN</th>
                     <th className="border border-slate-400 p-1">VII.</th>
                   </tr>
@@ -182,7 +192,11 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
                     <th className="border border-slate-400 p-1 min-w-[65px] bg-blue-50 text-right">Bản Thân</th>
                     <th className="border border-slate-400 p-1 min-w-[30px] bg-blue-50">NPT</th>
                     <th className="border border-slate-400 p-1 min-w-[60px] bg-blue-50 text-right">Giảm NPT</th>
-                    <th className="border border-slate-400 p-1 min-w-[65px] bg-blue-50 text-right">BHXH 10.5%</th>
+                    <th className="border border-slate-400 p-1 min-w-[65px] bg-blue-50 text-right">BHXH</th>
+                    <th className="border border-slate-400 p-1 min-w-[80px] bg-blue-100/70 text-right text-blue-950">
+                      <div>Giảm Trừ Khác</div>
+                      <div className="text-[7px] text-blue-700 font-normal">Ghi chú</div>
+                    </th>
 
                     {/* Thuế */}
                     <th className="border border-slate-400 p-1 min-w-[75px] bg-red-50 text-right font-bold text-slate-900">TN TÍNH THUẾ [4]</th>
@@ -247,6 +261,16 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
                           {p.dependentDeduction > 0 ? formatVND(p.dependentDeduction) : '-'}
                         </td>
                         <td className="border border-slate-400 p-1 text-right font-mono bg-blue-50/30">{formatVND(p.totalInsuranceEmp)}</td>
+                        <td className="border border-slate-400 p-1 text-right font-mono bg-blue-50/40">
+                          <span className={p.otherTaxDeduction && p.otherTaxDeduction > 0 ? 'font-bold text-blue-900' : 'text-slate-400'}>
+                            {p.otherTaxDeduction && p.otherTaxDeduction > 0 ? formatVND(p.otherTaxDeduction) : '-'}
+                          </span>
+                          {p.otherTaxDeductionNote && (
+                            <div className="text-[7px] text-blue-700 italic max-w-[85px] truncate print:max-w-none" title={p.otherTaxDeductionNote}>
+                              📝 {p.otherTaxDeductionNote}
+                            </div>
+                          )}
+                        </td>
 
                         {/* Thuế */}
                         <td className="border border-slate-400 p-1 text-right font-mono font-bold text-slate-900 bg-red-50/30">
@@ -293,6 +317,9 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
                     <td className="border border-slate-400 p-1.5 text-center font-mono">{totalDependentCount}</td>
                     <td className="border border-slate-400 p-1.5 text-right font-mono">{formatVND(totalDependentDeduction)}</td>
                     <td className="border border-slate-400 p-1.5 text-right font-mono">{formatVND(totalInsuranceDeduction)}</td>
+                    <td className="border border-slate-400 p-1.5 text-right font-mono font-bold text-blue-950 bg-blue-100/60">
+                      {totalOtherTaxDeduction > 0 ? formatVND(totalOtherTaxDeduction) : '-'}
+                    </td>
 
                     <td className="border border-slate-400 p-1.5 text-right font-mono font-black text-slate-900 bg-red-100">
                       {formatVND(totalAssessableIncome)}
@@ -348,7 +375,7 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
                     <strong>2. Khoản miễn thuế / không chịu thuế:</strong> {otDesc}; {mealDesc}; {uniformDesc}; phụ cấp điện thoại, xăng xe công tác phí khoán chi theo quy chế nội bộ.
                   </p>
                   <p>
-                    <strong>3. Giảm trừ gia cảnh:</strong> Bản thân người nộp thuế: {formatVND(settings.personalDeduction || 11000000)}/tháng; Giảm trừ mỗi người phụ thuộc: {formatVND(settings.dependentDeduction || 4400000)}/tháng; Các khoản bảo hiểm bắt buộc trích nộp từ lương NLĐ ({((settings.socialInsRateEmployee || 8) + (settings.healthInsRateEmployee || 1.5) + (settings.unemploymentInsRateEmployee || 1)).toFixed(1).replace(/\.0$/, '')}%).
+                    <strong>3. Các khoản giảm trừ:</strong> Bản thân người nộp thuế: {formatVND(settings.personalDeduction || 15500000)}/tháng; Giảm trừ mỗi người phụ thuộc: {formatVND(settings.dependentDeduction || 6200000)}/tháng; Các khoản bảo hiểm bắt buộc trích nộp từ lương NLĐ ({((settings.socialInsRateEmployee || 8) + (settings.healthInsRateEmployee || 1.5) + (settings.unemploymentInsRateEmployee || 1)).toFixed(1).replace(/\.0$/, '')}%); Các khoản giảm trừ khác (đóng góp từ thiện, nhân đạo, khuyến học, quỹ hưu trí tự nguyện theo quy định pháp luật).
                   </p>
                 </div>
               );

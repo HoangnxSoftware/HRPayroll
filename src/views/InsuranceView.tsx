@@ -1234,7 +1234,7 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                       <th className="p-2 border-l border-slate-200 min-w-[90px] bg-slate-100" rowSpan={2}>Quỹ Lương Năm</th>
                       <th className="p-2 border-l border-slate-200 min-w-[85px] bg-red-50 text-red-900" rowSpan={2}>NLĐ Đóng (10.5%)</th>
                       <th className="p-2 border-l border-slate-200 min-w-[85px] bg-blue-50 text-blue-900" rowSpan={2}>DN Đóng (23.5%)</th>
-                      <th className="p-2 border-l border-slate-200 min-w-[95px] bg-purple-100 text-purple-950 font-black" rowSpan={2}>Tổng Nộp (34%)</th>
+                      <th className="p-2 border-l border-slate-200 min-w-[95px] bg-purple-100 text-purple-950 font-black" rowSpan={2}>Tổng Nộp Cả Năm</th>
                       <th className="p-2 border-l border-slate-200 min-w-[80px]" rowSpan={2}>Bình Quân / Tháng</th>
                     </tr>
                     <tr className="bg-slate-100 text-[10px] text-slate-600 font-semibold">
@@ -1574,7 +1574,7 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                     <Clock className="w-4 h-4 text-emerald-600" />
                     <span>Lịch Sử Mức Lương Đóng BHXH Qua Các Thời Kỳ ({historyTarget.insurance.history?.length || 0} giai đoạn)</span>
                   </h4>
-                  <span className="text-[11px] text-slate-400">Tự động tính theo tỷ lệ chuẩn hệ thống (NLĐ 10.5%, DN 21.5%)</span>
+                  <span className="text-[11px] text-slate-400">Mức lương làm căn cứ trích nộp bảo hiểm qua từng giai đoạn</span>
                 </div>
 
                 <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
@@ -1583,9 +1583,6 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                       <tr>
                         <th className="px-3 py-2.5">Thời Gian (Từ - Đến)</th>
                         <th className="px-3 py-2.5 text-right">Mức Lương Đóng BHXH</th>
-                        <th className="px-3 py-2.5 text-right text-red-600">NLĐ (10.5%)</th>
-                        <th className="px-3 py-2.5 text-right text-blue-600">DN (21.5%)</th>
-                        <th className="px-3 py-2.5 text-right font-bold text-purple-900">Tổng Nộp (32%)</th>
                         <th className="px-3 py-2.5">Căn Cứ / Ghi Chú</th>
                         <th className="px-3 py-2.5 text-center">Trạng Thái</th>
                         {canEditEmployees && <th className="px-3 py-2.5 text-right">Thao Tác</th>}
@@ -1594,16 +1591,13 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {(!historyTarget.insurance.history || historyTarget.insurance.history.length === 0) ? (
                         <tr>
-                          <td colSpan={canEditEmployees ? 8 : 7} className="px-4 py-6 text-center text-slate-400">
+                          <td colSpan={canEditEmployees ? 5 : 4} className="px-4 py-6 text-center text-slate-400">
                             Chưa có dữ liệu giai đoạn đóng BHXH nào. Hãy thêm giai đoạn đầu tiên bên dưới!
                           </td>
                         </tr>
                       ) : (
                         historyTarget.insurance.history.map((item, idx) => {
                           const isOngoing = !item.toMonth;
-                          const empPart = Math.round(item.salary * 0.105);
-                          const erPart = Math.round(item.salary * 0.215);
-                          const totalPart = empPart + erPart;
 
                           return (
                             <tr key={item.id} className={`hover:bg-slate-50 transition-colors ${isOngoing ? 'bg-emerald-50/30' : ''}`}>
@@ -1618,15 +1612,6 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-900">
                                 {formatVND(item.salary)}
-                              </td>
-                              <td className="px-3 py-2.5 text-right font-mono text-red-600 font-semibold">
-                                {formatVND(empPart)}
-                              </td>
-                              <td className="px-3 py-2.5 text-right font-mono text-blue-600 font-semibold">
-                                {formatVND(erPart)}
-                              </td>
-                              <td className="px-3 py-2.5 text-right font-mono font-black text-purple-900">
-                                {formatVND(totalPart)}
                               </td>
                               <td className="px-3 py-2.5 text-slate-600 max-w-xs truncate">
                                 {item.note || <span className="text-slate-300 italic">-</span>}

@@ -107,6 +107,9 @@ export interface SystemSettings {
   defaultTaxMethod?: TaxCalculationMethod; // Mặc định: 'progressive'
   monthlyEmployeeTaxMethods?: Record<string, TaxCalculationMethod>; // Key: `${monthKey}_${employeeId}`
 
+  // Các khoản giảm trừ tính thuế TNCN khác từng tháng (từ thiện, nhân đạo, khuyến học, hưu trí tự nguyện...)
+  monthlyOtherTaxDeductions?: Record<string, { amount: number; note?: string }>; // Key: `${monthKey}_${employeeId}`
+
   // Thiết lập thu nhập miễn thuế / không được miễn thuế TNCN (Tăng ca, Ăn ca tiền mặt, Trang phục, Điện thoại...)
   taxExemptionRules?: TaxExemptionRules;
 
@@ -431,7 +434,9 @@ export interface PayrollRecord {
   personalDeduction: number; // 11,000,000 đ
   dependentCount: number; // Số người phụ thuộc
   dependentDeduction: number; // 4,400,000 * số người
-  totalDeductionsForTax: number; // Bản thân + NPT + BHXH NLĐ
+  otherTaxDeduction?: number; // Các khoản giảm trừ khác (từ thiện, nhân đạo, khuyến học, hưu trí tự nguyện...)
+  otherTaxDeductionNote?: string; // Ghi chú khoản giảm trừ khác
+  totalDeductionsForTax: number; // Bản thân + NPT + BHXH NLĐ + Giảm trừ khác
   
   taxableIncome: number; // Thu nhập chịu thuế = Gross - Thu nhập miễn thuế (OT miễn thuế, ăn ca miễn thuế, phụ cấp miễn thuế)
   assessableIncome: number; // Thu nhập tính thuế = max(0, Thu nhập chịu thuế - Các khoản giảm trừ)

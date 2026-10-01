@@ -24,6 +24,7 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
   const totalTaxWithheld = annualRecords.reduce((sum, r) => sum + r.totalTaxWithheldYear, 0);
   const totalTaxableIncome = annualRecords.reduce((sum, r) => sum + r.totalTaxableIncomeYear, 0);
   const totalDeductions = annualRecords.reduce((sum, r) => sum + r.totalDeductionsYear, 0);
+  const totalOtherDeductions = annualRecords.reduce((sum, r) => sum + (r.totalOtherTaxDeductionYear || 0), 0);
   const totalAssessable = annualRecords.reduce((sum, r) => sum + r.totalAssessableIncomeYear, 0);
   const totalAnnualPayable = annualRecords.reduce((sum, r) => sum + r.annualPayableTax, 0);
   const totalDifference = totalTaxWithheld - totalAnnualPayable;
@@ -154,8 +155,9 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
                   <th className="p-2 border-r border-slate-300 text-right bg-amber-50 font-bold text-amber-950 min-w-[100px]">
                     TN Chịu Thuế [2]
                   </th>
-                  <th className="p-2 border-r border-slate-300 text-right text-slate-700 min-w-[90px]">
-                    Giảm Trừ [3]
+                  <th className="p-2 border-r border-slate-300 text-right text-slate-700 min-w-[95px]">
+                    <div>Giảm Trừ [3]</div>
+                    <div className="text-[8px] text-slate-500 font-normal">Bản thân+NPT+BH+Khác</div>
                   </th>
                   <th className="p-2 border-r border-slate-300 text-right bg-blue-50 font-bold text-blue-900 min-w-[95px]">
                     TNTT Năm [4]
@@ -202,8 +204,13 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
                     </td>
 
                     {/* Tổng giảm trừ */}
-                    <td className="p-2 border-r border-slate-200 text-right text-slate-600">
-                      {r.totalDeductionsYear.toLocaleString('vi-VN')}
+                    <td className="p-2 border-r border-slate-200 text-right text-slate-700">
+                      <div>{r.totalDeductionsYear.toLocaleString('vi-VN')}</div>
+                      {r.totalOtherTaxDeductionYear > 0 && (
+                        <div className="text-[8px] text-blue-700 font-normal">
+                          (+{r.totalOtherTaxDeductionYear.toLocaleString('vi-VN')} đ khác)
+                        </div>
+                      )}
                     </td>
 
                     {/* Thu nhập tính thuế năm */}
@@ -252,8 +259,13 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
                   <td className="p-2 border-r border-slate-300 text-right font-black text-amber-950 bg-amber-100/60">
                     {totalTaxableIncome.toLocaleString('vi-VN')}
                   </td>
-                  <td className="p-2 border-r border-slate-300 text-right text-slate-800">
-                    {totalDeductions.toLocaleString('vi-VN')}
+                  <td className="p-2 border-r border-slate-300 text-right text-slate-800 font-bold">
+                    <div>{totalDeductions.toLocaleString('vi-VN')}</div>
+                    {totalOtherDeductions > 0 && (
+                      <div className="text-[8px] text-blue-700 font-normal">
+                        (gồm {totalOtherDeductions.toLocaleString('vi-VN')} đ khác)
+                      </div>
+                    )}
                   </td>
                   <td className="p-2 border-r border-slate-300 text-right font-black text-blue-900 bg-blue-100/60">
                     {totalAssessable.toLocaleString('vi-VN')}

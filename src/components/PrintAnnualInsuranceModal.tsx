@@ -254,7 +254,7 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
                       <th className="border border-slate-400 p-1 min-w-[80px] bg-red-50 text-red-950" rowSpan={2}>Tổng NLĐ Đóng</th>
                       <th className="border border-slate-400 p-1 min-w-[80px] bg-blue-50 text-blue-950" rowSpan={2}>Tổng DN Đóng</th>
                       <th className="border border-slate-400 p-1 min-w-[95px] bg-purple-50 text-purple-950 font-black" rowSpan={2}>
-                        Tổng Nộp Cả Năm (34%)
+                        Tổng Nộp Cả Năm
                       </th>
                       <th className="border border-slate-400 p-1 min-w-[75px] bg-purple-50 text-purple-950" rowSpan={2}>
                         Bình Quân / Tháng
@@ -383,7 +383,7 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
                         Doanh Nghiệp Đóng Cả Năm ({erTotalRate}%)
                       </th>
                       <th rowSpan={2} className="border border-slate-400 p-1 min-w-[95px] bg-purple-100 text-purple-950 font-black">
-                        Tổng Nộp Cả Năm ({totalAllRate}%)
+                        Tổng Nộp Cả Năm
                       </th>
                     </tr>
                     <tr className="text-[9px]">

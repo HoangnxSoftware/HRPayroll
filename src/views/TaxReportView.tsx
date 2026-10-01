@@ -18,7 +18,10 @@ import {
   RotateCcw,
   Percent,
   AlertTriangle,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Pencil,
+  X,
+  HeartHandshake
 } from 'lucide-react';
 import { 
   PayrollRecord, 
@@ -90,6 +93,16 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
   const [isEditBracketsOpen, setIsEditBracketsOpen] = useState(false);
   const [isEditExemptionOpen, setIsEditExemptionOpen] = useState(false);
 
+  // Modal điều chỉnh khoản giảm trừ khác từng người trong tháng (từ thiện, nhân đạo, hưu trí...)
+  const [otherDeductionModal, setOtherDeductionModal] = useState<{
+    isOpen: boolean;
+    employeeId: string;
+    employeeName: string;
+    employeeCode: string;
+    amount: number;
+    note: string;
+  } | null>(null);
+
   // Inline withholding config state for quick edit in tab 4
   const [withholdingFormRate, setWithholdingFormRate] = useState<number>(settings.taxWithholdingRateResident ?? 10);
   const [withholdingFormThreshold, setWithholdingFormThreshold] = useState<number>(settings.taxWithholdingThreshold ?? 5000000);
@@ -155,7 +168,8 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
   const totalDependentCount = useMemo(() => payrolls.reduce((s, p) => s + p.dependentCount, 0), [payrolls]);
   const totalDependentDeduction = useMemo(() => payrolls.reduce((s, p) => s + p.dependentDeduction, 0), [payrolls]);
   const totalInsuranceDeduction = useMemo(() => payrolls.reduce((s, p) => s + p.totalInsuranceEmp, 0), [payrolls]);
-  const totalAllDeductions = useMemo(() => totalPersonalDeduction + totalDependentDeduction + totalInsuranceDeduction, [totalPersonalDeduction, totalDependentDeduction, totalInsuranceDeduction]);
+  const totalOtherTaxDeduction = useMemo(() => payrolls.reduce((s, p) => s + (p.otherTaxDeduction || 0), 0), [payrolls]);
+  const totalAllDeductions = useMemo(() => totalPersonalDeduction + totalDependentDeduction + totalInsuranceDeduction + totalOtherTaxDeduction, [totalPersonalDeduction, totalDependentDeduction, totalInsuranceDeduction, totalOtherTaxDeduction]);
   
   const totalAssessable = useMemo(() => payrolls.reduce((s, p) => s + p.assessableIncome, 0), [payrolls]);
   const totalTax = useMemo(() => payrolls.reduce((s, p) => s + p.personalIncomeTax, 0), [payrolls]);
@@ -227,11 +241,13 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
       .reduce((s, r) => s + Math.abs(r.taxDifference), 0);
 
     const totalMultipleCodesCount = annualTaxRecords.filter(r => r.hasMultipleCodes).length;
+    const totalOtherTaxDeductionsYear = annualTaxRecords.reduce((s, r) => s + (r.totalOtherTaxDeductionYear || 0), 0);
 
     return {
       totalTaxWithheldYear,
       totalTaxableIncomeYear,
       totalDeductionsYear,
+      totalOtherTaxDeductionsYear,
       totalAssessableIncomeYear,
       totalAnnualPayableTax,
       totalDifference,
@@ -258,6 +274,22 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
       ...settings,
       monthlyEmployeeTaxMethods: updatedMap
     });
+  };
+
+  // Lưu khoản giảm trừ khác từng nhân viên trong tháng
+  const handleSaveOtherDeduction = (employeeId: string, amount: number, note: string) => {
+    if (!onUpdateSettings) return;
+    const key = `${currentMonthKey}_${employeeId}`;
+    const updatedMap = {
+      ...(settings.monthlyOtherTaxDeductions || {}),
+      [key]: { amount: Math.max(0, amount), note: note.trim() }
+    };
+
+    onUpdateSettings({
+      ...settings,
+      monthlyOtherTaxDeductions: updatedMap
+    });
+    setOtherDeductionModal(null);
   };
 
   // Save quick withholding settings
@@ -462,8 +494,11 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
               {formatVND(totalAllDeductions)}
             </div>
             <div className="text-[11px] text-slate-500 mt-1 flex flex-col gap-0.5">
-              <span>• Bản thân (15.5tr) & NPT ({totalDependentCount} người): <strong className="font-mono text-blue-700">{formatVND(totalPersonalDeduction + totalDependentDeduction)}</strong></span>
+              <span>• Bản thân & NPT ({totalDependentCount} người): <strong className="font-mono text-blue-700">{formatVND(totalPersonalDeduction + totalDependentDeduction)}</strong></span>
               <span>• BHXH NLĐ 10.5%: <strong className="font-mono text-blue-700">{formatVND(totalInsuranceDeduction)}</strong></span>
+              {totalOtherTaxDeduction > 0 && (
+                <span>• Giảm trừ khác (từ thiện, hưu trí...): <strong className="font-mono text-blue-700">{formatVND(totalOtherTaxDeduction)}</strong></span>
+              )}
               <span className="text-amber-800 font-semibold pt-1 border-t border-slate-100">
                 Thu nhập tính thuế: <strong className="font-mono font-bold">{formatVND(totalAssessable)}</strong>
               </span>
@@ -718,7 +753,11 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                   <th className="px-3 py-3 text-right text-slate-600 min-w-[95px]">Bản Thân</th>
                   <th className="px-3 py-3 text-center text-slate-600 w-12">NPT</th>
                   <th className="px-3 py-3 text-right text-slate-600 min-w-[95px]">Giảm NPT</th>
-                  <th className="px-3 py-3 text-right text-slate-600 min-w-[95px]">BHXH 10.5%</th>
+                  <th className="px-3 py-3 text-right text-slate-600 min-w-[95px]">BHXH</th>
+                  <th className="px-3 py-3 text-right text-blue-900 bg-blue-50/60 min-w-[130px]">
+                    <div>Giảm Trừ Khác</div>
+                    <div className="text-[9px] text-blue-600 font-normal normal-case">Có ghi chú</div>
+                  </th>
                   
                   {/* Tính thuế */}
                   <th className="px-3 py-3 text-right font-bold text-amber-900 bg-amber-50/30 min-w-[110px]">
@@ -801,6 +840,39 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                         {formatVND(p.totalInsuranceEmp)}
                       </td>
 
+                      {/* Các khoản giảm trừ khác (có ghi chú) */}
+                      <td className="px-3 py-3 text-right bg-blue-50/20 border-x border-blue-100">
+                        <div className="flex flex-col items-end">
+                          <div className="flex items-center gap-1.5 justify-end">
+                            <span className={`font-mono font-bold ${p.otherTaxDeduction && p.otherTaxDeduction > 0 ? 'text-blue-900' : 'text-slate-400'}`}>
+                              {p.otherTaxDeduction && p.otherTaxDeduction > 0 ? formatVND(p.otherTaxDeduction) : '-'}
+                            </span>
+                            {canEditSettings && (
+                              <button
+                                type="button"
+                                onClick={() => setOtherDeductionModal({
+                                  isOpen: true,
+                                  employeeId: p.employeeId,
+                                  employeeName: emp?.fullName || '',
+                                  employeeCode: emp?.employeeCode || '',
+                                  amount: p.otherTaxDeduction || 0,
+                                  note: p.otherTaxDeductionNote || ''
+                                })}
+                                className="p-1 hover:bg-blue-100 text-blue-600 rounded transition-colors cursor-pointer"
+                                title="Điều chỉnh khoản giảm trừ khác (từ thiện, nhân đạo, khuyến học, hưu trí tự nguyện...)"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                          {p.otherTaxDeductionNote && (
+                            <span className="text-[10px] text-blue-700 italic max-w-[130px] truncate block mt-0.5" title={p.otherTaxDeductionNote}>
+                              📝 {p.otherTaxDeductionNote}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
                       {/* Thu nhập tính thuế */}
                       <td className="px-3 py-3 text-right font-mono font-bold text-amber-900 bg-amber-50/30">
                         {formatVND(p.assessableIncome)}
@@ -865,6 +937,9 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                   <td className="px-3 py-3 text-right font-mono text-slate-700">
                     {formatVND(totalInsuranceDeduction)}
                   </td>
+                  <td className="px-3 py-3 text-right font-mono font-bold text-blue-900 bg-blue-50/50">
+                    {totalOtherTaxDeduction > 0 ? formatVND(totalOtherTaxDeduction) : '-'}
+                  </td>
                   <td className="px-3 py-3 text-right font-mono font-black text-amber-900 bg-amber-100/50">
                     {formatVND(totalAssessable)}
                   </td>
@@ -893,6 +968,9 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
               </h4>
               <p className="mt-0.5 text-amber-900">
                 • <strong>Mã số thuế TNCN chính là số Căn cước công dân (CCCD).</strong> Trường hợp danh sách người lao động có lao động trùng CCCD (mã số thuế) nhưng khác mã NV (do thay đổi vị trí công việc, thay đổi cách tính lương, nghỉ việc rồi đi làm lại... được tạo mã NV mới), hệ thống <strong>tự động tính gộp toàn bộ thu nhập, các khoản giảm trừ và thuế đã khấu trừ của những lao động trùng CCCD</strong> để tính quyết toán thuế TNCN cả năm.
+              </p>
+              <p className="mt-0.5 text-amber-900">
+                • <strong>Tổng các khoản giảm trừ cả năm [3]:</strong> Đã bao gồm toàn bộ giảm trừ Bản thân + Người phụ thuộc + BHXH 10.5% + <strong>Các khoản giảm trừ khác</strong> (từ thiện, nhân đạo, khuyến học, hưu trí tự nguyện kê khai trong năm). Thu nhập tính thuế [4] = max(0, [2] - [3]).
               </p>
               <p className="mt-0.5 text-amber-900">
                 • <strong>Chênh lệch quyết toán [6 = 1 - 5]:</strong> Nếu số thuế tạm khấu trừ [1] lớn hơn thuế tính theo cả năm [5] là <strong>Nộp thừa (Hoàn thuế)</strong>; nếu nhỏ hơn là <strong>Nộp thiếu (Phải nộp thêm vào NSNN)</strong>.
@@ -937,9 +1015,9 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                     </th>
 
                     {/* Tổng giảm trừ cả năm */}
-                    <th className="px-3 py-3 text-right text-slate-700 min-w-[105px]">
+                    <th className="px-3 py-3 text-right text-slate-700 min-w-[125px]">
                       <div>Tổng Giảm Trừ [3]</div>
-                      <div className="text-[9px] text-slate-500 normal-case">Bản thân+NPT+BH</div>
+                      <div className="text-[9px] text-slate-500 normal-case">Bản thân+NPT+BH+Khác</div>
                     </th>
 
                     {/* Thu nhập tính thuế cả năm */}
@@ -1014,8 +1092,13 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                       </td>
 
                       {/* Tổng giảm trừ cả năm [3] */}
-                      <td className="px-3 py-3 text-right text-slate-600">
-                        {r.totalDeductionsYear.toLocaleString('vi-VN')}
+                      <td className="px-3 py-3 text-right text-slate-700">
+                        <div className="font-semibold">{r.totalDeductionsYear.toLocaleString('vi-VN')}</div>
+                        {r.totalOtherTaxDeductionYear > 0 && (
+                          <div className="text-[10px] text-blue-700 font-normal">
+                            (+{r.totalOtherTaxDeductionYear.toLocaleString('vi-VN')} đ khác)
+                          </div>
+                        )}
                       </td>
 
                       {/* Thu nhập tính thuế cả năm [4] */}
@@ -1065,8 +1148,13 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                     <td className="px-3 py-3 text-right font-black text-amber-950 bg-amber-100/60">
                       {annualGrandTotals.totalTaxableIncomeYear.toLocaleString('vi-VN')}
                     </td>
-                    <td className="px-3 py-3 text-right text-slate-700">
-                      {annualGrandTotals.totalDeductionsYear.toLocaleString('vi-VN')}
+                    <td className="px-3 py-3 text-right text-slate-800">
+                      <div className="font-bold">{annualGrandTotals.totalDeductionsYear.toLocaleString('vi-VN')}</div>
+                      {annualGrandTotals.totalOtherTaxDeductionsYear > 0 && (
+                        <div className="text-[10px] text-blue-850 font-normal">
+                          (gồm {annualGrandTotals.totalOtherTaxDeductionsYear.toLocaleString('vi-VN')} đ khác)
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-right font-black text-blue-900 bg-blue-100/60">
                       {annualGrandTotals.totalAssessableIncomeYear.toLocaleString('vi-VN')}
@@ -1385,6 +1473,129 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
           }
         }}
       />
+
+      {/* Modal Cập nhật Các Khoản Giảm Trừ Khác (Có ghi chú) */}
+      {otherDeductionModal?.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
+            <div className="p-4 border-b border-slate-200 bg-blue-50/50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <HeartHandshake className="w-5 h-5 text-blue-600 shrink-0" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Các Khoản Giảm Trừ Khác</h3>
+                  <p className="text-[11px] text-slate-500">
+                    {otherDeductionModal.employeeName} ({otherDeductionModal.employeeCode}) • Tháng {settings.currentMonth}/{settings.currentYear}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOtherDeductionModal(null)}
+                className="p-1 hover:bg-slate-200 rounded-lg text-slate-500 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                const form = e.currentTarget;
+                const amtInput = form.elements.namedItem('amount') as HTMLInputElement;
+                const noteInput = form.elements.namedItem('note') as HTMLInputElement;
+                const amt = Number((amtInput?.value || '').replace(/\D/g, '')) || 0;
+                const nt = noteInput?.value || '';
+                handleSaveOtherDeduction(otherDeductionModal.employeeId, amt, nt);
+              }}
+              className="p-5 space-y-4 text-xs"
+            >
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-[11px] leading-relaxed">
+                <strong>Theo Luật thuế TNCN:</strong> Các khoản giảm trừ khác bao gồm đóng góp từ thiện, nhân đạo, khuyến học và quỹ hưu trí tự nguyện được trừ vào thu nhập chịu thuế trước khi tính thuế TNCN.
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Số Tiền Giảm Trừ Khác (VNĐ) *</label>
+                <input
+                  type="text"
+                  name="amount"
+                  defaultValue={otherDeductionModal.amount > 0 ? otherDeductionModal.amount.toLocaleString('vi-VN') : ''}
+                  placeholder="Ví dụ: 500.000"
+                  onChange={e => {
+                    const raw = e.target.value.replace(/\D/g, '');
+                    e.target.value = raw ? Number(raw).toLocaleString('vi-VN') : '';
+                  }}
+                  className="w-full px-3 py-2 border-2 border-slate-300 focus:border-blue-500 rounded-xl font-mono font-bold text-sm text-slate-900 outline-none"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Ghi Chú Khoản Giảm Trừ</label>
+                <input
+                  type="text"
+                  name="note"
+                  defaultValue={otherDeductionModal.note}
+                  placeholder="Ví dụ: Đóng góp quỹ khuyến học, Ủng hộ bão lũ, Hưu trí tự nguyện..."
+                  className="w-full px-3 py-2 border border-slate-300 focus:border-blue-500 rounded-xl text-xs text-slate-900 outline-none"
+                />
+                
+                {/* Gợi ý nhanh */}
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {[
+                    'Ủng hộ đồng bào bão lũ',
+                    'Đóng góp quỹ khuyến học',
+                    'Ủng hộ quỹ vì người nghèo',
+                    'Đóng quỹ hưu trí tự nguyện'
+                  ].map(suggestion => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={e => {
+                        const form = (e.target as HTMLElement).closest('form');
+                        if (form) {
+                          const noteInput = form.querySelector('input[name="note"]') as HTMLInputElement;
+                          if (noteInput) noteInput.value = suggestion;
+                        }
+                      }}
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-blue-100 hover:text-blue-800 text-[10px] rounded-md font-medium text-slate-600 transition-colors cursor-pointer"
+                    >
+                      + {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-200">
+                {otherDeductionModal.amount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => handleSaveOtherDeduction(otherDeductionModal.employeeId, 0, '')}
+                    className="text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer text-[11px]"
+                  >
+                    Xóa khoản giảm trừ này
+                  </button>
+                ) : <span />}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOtherDeductionModal(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors cursor-pointer"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+                  >
+                    Lưu Giảm Trừ
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -358,6 +358,8 @@ export const exportTaxReportToExcel = (
       'Số Người Phụ Thuộc': p.dependentCount,
       'Giảm Trừ NPT': p.dependentDeduction,
       'Bảo Hiểm Được Trừ (10.5%)': p.totalInsuranceEmp,
+      'Giảm Trừ Khác': p.otherTaxDeduction || 0,
+      'Ghi Chú Giảm Trừ Khác': p.otherTaxDeductionNote || '',
       'TỔNG CÁC KHOẢN GIẢM TRỪ': p.totalDeductionsForTax,
       // Tính thuế
       'Thu Nhập Tính Thuế (TNTT)': p.assessableIncome,
@@ -401,6 +403,7 @@ export const exportAnnualTaxReportToExcel = (
     'TỔNG THUẾ ĐÃ KHẤU TRỪ CẢ NĂM [1]': r.totalTaxWithheldYear,
     'TỔNG THU NHẬP CHỊU THUẾ CẢ NĂM [2]': r.totalTaxableIncomeYear,
     'TỔNG CÁC KHOẢN GIẢM TRỪ CẢ NĂM [3]': r.totalDeductionsYear,
+    'Trong Đó Giảm Trừ Khác Cả Năm': r.totalOtherTaxDeductionYear || 0,
     'THU NHẬP TÍNH THUẾ CẢ NĂM [4]': r.totalAssessableIncomeYear,
     'THUẾ TNCN TÍNH THEO CẢ NĂM [5]': r.annualPayableTax,
     'CHÊNH LỆCH QUYẾT TOÁN [6 = 1 - 5]': r.taxDifference,
