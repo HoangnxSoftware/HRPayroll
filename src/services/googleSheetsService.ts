@@ -553,6 +553,8 @@ export const exportDataToGoogleSheets = async (
   const employeeHeader = [
     'Mã Nhân Viên',
     'Họ và Tên',
+    'Giới Tính',
+    'Quốc Tịch',
     'Số Căn Cước (CCCD)',
     'Ngày Sinh',
     'Ngày Cấp',
@@ -581,6 +583,8 @@ export const exportDataToGoogleSheets = async (
     ...data.employees.map(emp => [
       emp.employeeCode,
       emp.fullName,
+      emp.gender || 'Nam',
+      emp.nationality || 'Việt Nam',
       emp.idCardNumber,
       emp.birthDate,
       emp.issueDate,
@@ -1503,48 +1507,95 @@ export const importFullDataFromGoogleSheets = async (
 
   // 6. Đọc danh sách nhân viên (DanhSach_NhanVien)
   try {
-    const empRows = await fetchValues('DanhSach_NhanVien!A2:T500');
-    if (empRows.length > 0) {
-      result.employees = empRows
-        .filter(row => row && row[0] && row[1])
+    const rawEmpRows = await fetchValues('DanhSach_NhanVien!A1:Z500');
+    if (rawEmpRows.length > 0) {
+      // Nhận diện dòng tiêu đề cột
+      const firstRow = rawEmpRows[0].map(c => String(c || '').trim().toLowerCase());
+      const hasHeader = firstRow.some(c => 
+        c.includes('mã nv') || c.includes('mã nhân viên') || c.includes('họ và tên') || c.includes('họ tên')
+      );
+      const headerRow = hasHeader ? firstRow : [];
+      const dataRows = hasHeader ? rawEmpRows.slice(1) : rawEmpRows;
+
+      const findColIdx = (keywords: string[], fallbackIdx: number): number => {
+        if (!hasHeader) return fallbackIdx;
+        const idx = headerRow.findIndex(h => keywords.some(k => h.includes(k)));
+        return idx !== -1 ? idx : fallbackIdx;
+      };
+
+      const genderIdx = findColIdx(['giới tính'], -1);
+      const nationalityIdx = findColIdx(['quốc tịch'], -1);
+      const hasNewCols = genderIdx !== -1 || nationalityIdx !== -1;
+
+      const codeIdx = findColIdx(['mã nhân viên', 'mã nv'], 0);
+      const nameIdx = findColIdx(['họ và tên', 'họ tên'], 1);
+      const idCardIdx = findColIdx(['số căn cước', 'căn cước', 'cccd', 'số cccd', 'cmnd'], hasNewCols ? 4 : 2);
+      const birthIdx = findColIdx(['ngày sinh'], hasNewCols ? 5 : 3);
+      const issueDateIdx = findColIdx(['ngày cấp'], hasNewCols ? 6 : 4);
+      const issuePlaceIdx = findColIdx(['nơi cấp'], hasNewCols ? 7 : 5);
+      const addressIdx = findColIdx(['địa chỉ'], hasNewCols ? 8 : 6);
+      const phoneIdx = findColIdx(['số điện thoại', 'điện thoại', 'sđt'], hasNewCols ? 9 : 7);
+      const emailIdx = findColIdx(['email'], hasNewCols ? 10 : 8);
+      const depIdx = findColIdx(['phòng ban', 'bộ phận'], hasNewCols ? 11 : 9);
+      const posIdx = findColIdx(['chức vụ'], hasNewCols ? 12 : 10);
+      const statusIdx = findColIdx(['trạng thái'], hasNewCols ? 13 : 11);
+      const startIdx = findColIdx(['ngày vào làm', 'ngày vào'], hasNewCols ? 14 : 12);
+      const basisIdx = findColIdx(['hình thức lương', 'loại lương'], hasNewCols ? 15 : 13);
+      const salaryIdx = findColIdx(['mức lương', 'lương cơ bản', 'lương thỏa thuận'], hasNewCols ? 16 : 14);
+      const percentIdx = findColIdx(['% lương', 'tỷ lệ lương', 'phần trăm'], hasNewCols ? 17 : 15);
+      const bankAccIdx = findColIdx(['số tài khoản', 'stk'], hasNewCols ? 18 : 16);
+      const bankNameIdx = findColIdx(['ngân hàng'], hasNewCols ? 19 : 17);
+      const taxIdIdx = findColIdx(['mã số thuế', 'mst cá nhân', 'mst'], hasNewCols ? 20 : 18);
+      const idIdx = findColIdx(['id hệ thống', 'id'], hasNewCols ? 21 : 19);
+
+      result.employees = dataRows
+        .filter(row => row && row.length > 0 && (row[codeIdx] || row[nameIdx]))
         .map((row, idx) => {
-          const depInput = String(row[9] || '').trim().toLowerCase();
-          const posInput = String(row[10] || '').trim().toLowerCase();
+          const rawGender = genderIdx !== -1 && row[genderIdx] ? String(row[genderIdx]).trim() : '';
+          const gender = rawGender.toLowerCase().includes('nữ') ? 'Nữ' 
+            : rawGender.toLowerCase().includes('khác') ? 'Khác' 
+            : rawGender ? 'Nam' : 'Nam';
+          const nationality = nationalityIdx !== -1 && row[nationalityIdx] ? String(row[nationalityIdx]).trim() : 'Việt Nam';
+
+          const depInput = String(row[depIdx] || '').trim().toLowerCase();
+          const posInput = String(row[posIdx] || '').trim().toLowerCase();
           const depId = depNameToId.get(depInput) || depCodeToId.get(depInput) || defaultDepId;
           const posId = posNameToId.get(posInput) || posCodeToId.get(posInput) || defaultPosId;
 
-          const workStatusStr = String(row[11] || '').toLowerCase();
+          const workStatusStr = String(row[statusIdx] || '').toLowerCase();
           const workStatus = workStatusStr.includes('thử') ? 'probation'
             : workStatusStr.includes('nghỉ việc') || workStatusStr.includes('đã nghỉ') ? 'resigned'
             : workStatusStr.includes('chuyển') ? 'transferred'
             : workStatusStr.includes('thai sản') ? 'maternity' : 'active';
 
-          const basisStr = String(row[13] || '').toLowerCase();
+          const basisStr = String(row[basisIdx] || '').toLowerCase();
           const salaryBasis = basisStr.includes('ngày') ? 'daily'
             : basisStr.includes('giờ') ? 'hourly'
             : basisStr.includes('kpi') || basisStr.includes('phần trăm') ? 'percent' : 'monthly';
 
           return {
-            id: row[19] ? String(row[19]).trim() : `emp-g-${idx + 1}`,
-            employeeCode: String(row[0] || `NV-${idx + 1}`).trim(),
-            fullName: String(row[1] || 'Chưa đặt tên').trim(),
-            idCardNumber: String(row[2] || '').trim(),
-            birthDate: String(row[3] || '1990-01-01').trim(),
-            issueDate: String(row[4] || '').trim(),
-            issuePlace: String(row[5] || '').trim(),
-            address: String(row[6] || '').trim(),
-            phoneNumber: String(row[7] || '').trim(),
-            email: String(row[8] || '').trim(),
+            id: row[idIdx] ? String(row[idIdx]).trim() : `emp-g-${idx + 1}`,
+            employeeCode: String(row[codeIdx] || `NV-${idx + 1}`).trim(),
+            fullName: String(row[nameIdx] || 'Chưa đặt tên').trim(),
+            gender,
+            nationality: nationality || 'Việt Nam',
+            idCardNumber: String(row[idCardIdx] || '').trim(),
+            birthDate: String(row[birthIdx] || '1990-01-01').trim(),
+            issueDate: String(row[issueDateIdx] || '').trim(),
+            issuePlace: String(row[issuePlaceIdx] || '').trim(),
+            address: String(row[addressIdx] || '').trim(),
+            phoneNumber: String(row[phoneIdx] || '').trim(),
+            email: String(row[emailIdx] || '').trim(),
             departmentId: depId,
             positionId: posId,
             workStatus,
-            startDate: String(row[12] || '2024-01-01').trim(),
+            startDate: String(row[startIdx] || '2024-01-01').trim(),
             salaryBasis,
-            baseSalary: Number(String(row[14] || '0').replace(/[^\d.-]/g, '')) || 10000000,
-            salaryPercent: Number(row[15]) || 100,
-            bankAccount: String(row[16] || '').trim(),
-            bankName: String(row[17] || '').trim(),
-            taxId: String(row[18] || '').trim()
+            baseSalary: Number(String(row[salaryIdx] || '0').replace(/[^\d.-]/g, '')) || 10000000,
+            salaryPercent: Number(row[percentIdx]) || 100,
+            bankAccount: String(row[bankAccIdx] || '').trim(),
+            bankName: String(row[bankNameIdx] || '').trim(),
+            taxId: String(row[taxIdIdx] || '').trim()
           };
         });
     }

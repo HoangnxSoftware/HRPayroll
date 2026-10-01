@@ -37,7 +37,7 @@ interface PayrollViewProps {
   settings: SystemSettings;
   syncState: GoogleSyncState;
   onOpenSync: () => void;
-  onPrintPayroll: () => void;
+  onPrintPayroll: (departmentId?: string) => void;
   onPrintSlip: (employeeId?: string, initialSelectedIds?: string[]) => void;
   onUpdatePayrollStatus: (payrollId: string, status: PaymentStatus) => void;
   onUpdateAdvancePayment: (payrollId: string, amount: number) => void;
@@ -160,7 +160,7 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
           </button>
 
           <button
-            onClick={onPrintPayroll}
+            onClick={() => onPrintPayroll(filterDepartment !== 'all' ? filterDepartment : undefined)}
             className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <FileSpreadsheet className="w-4 h-4" />

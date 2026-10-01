@@ -122,6 +122,7 @@ function PayrollAppContent() {
   // Modal states
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isPrintPayrollOpen, setIsPrintPayrollOpen] = useState(false);
+  const [printPayrollDepartmentId, setPrintPayrollDepartmentId] = useState<string | undefined>(undefined);
   const [isPrintSlipOpen, setIsPrintSlipOpen] = useState(false);
   const [selectedSlipEmpId, setSelectedSlipEmpId] = useState<string | undefined>(undefined);
   const [selectedSlipEmpIds, setSelectedSlipEmpIds] = useState<string[] | undefined>(undefined);
@@ -555,7 +556,10 @@ function PayrollAppContent() {
               settings={settings}
               syncState={syncState}
               onOpenSync={() => setIsSyncModalOpen(true)}
-              onPrintPayroll={() => setIsPrintPayrollOpen(true)}
+              onPrintPayroll={(depId) => {
+                setPrintPayrollDepartmentId(depId);
+                setIsPrintPayrollOpen(true);
+              }}
               onPrintSlip={handleOpenPrintSlip}
               onUpdatePayrollStatus={handleUpdatePayrollStatus}
               onUpdateAdvancePayment={handleUpdateAdvancePayment}
@@ -693,11 +697,15 @@ function PayrollAppContent() {
 
       <PrintPayrollModal
         isOpen={isPrintPayrollOpen}
-        onClose={() => setIsPrintPayrollOpen(false)}
+        onClose={() => {
+          setIsPrintPayrollOpen(false);
+          setPrintPayrollDepartmentId(undefined);
+        }}
         employees={employees}
         payrolls={payrolls}
         settings={settings}
         month={`${settings.currentMonth}/${settings.currentYear}`}
+        initialDepartmentId={printPayrollDepartmentId}
       />
 
       <EmployeeModal
