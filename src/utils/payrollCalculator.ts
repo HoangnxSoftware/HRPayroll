@@ -12,7 +12,10 @@ import {
   Holiday,
   TaxBracket,
   TaxExemptionRules,
-  TaxCalculationMethod
+  TaxCalculationMethod,
+  WorkHistoryItem,
+  WorkStatus,
+  SalaryCalculationBasis
 } from '../types';
 
 export interface EffectiveInsuranceRates {
@@ -493,6 +496,126 @@ export const isMonthTimekept = (
 };
 
 /**
+ * Cấu trúc thông tin hiệu lực tại một tháng cụ thể của người lao động
+ */
+export interface EffectiveWorkRecord {
+  departmentId: string;
+  positionId: string;
+  workStatus: WorkStatus;
+  salaryBasis: SalaryCalculationBasis;
+  baseSalary: number;
+  hourlyRate?: number;
+  salaryPercent?: number;
+  transferLocation?: string;
+  note?: string;
+}
+
+/**
+ * Tra cứu thông tin chức vụ, phòng ban, trạng thái làm việc, hình thức tính lương và mức lương cơ bản
+ * có hiệu lực tại một tháng cụ thể dựa theo Quá trình làm việc / Lịch sử công tác.
+ * Đối với Thử việc, Điều chuyển, Nghỉ thai sản: khi hết thời gian tự động cập nhật về Chính thức.
+ */
+export const getEffectiveWorkRecordForMonth = (
+  employee: Employee,
+  year: number,
+  month: number
+): EffectiveWorkRecord => {
+  const targetMonthStr = `${year}-${String(month).padStart(2, '0')}`;
+
+  // 1. Kiểm tra nếu nhân viên có danh sách workHistory được lưu trữ
+  if (employee.workHistory && employee.workHistory.length > 0) {
+    const sorted = [...employee.workHistory].sort((a, b) => (b.fromMonth || '').localeCompare(a.fromMonth || ''));
+    const matched = sorted.find(h => {
+      const fromM = h.fromMonth ? h.fromMonth.slice(0, 7) : '';
+      const toM = h.toMonth ? h.toMonth.slice(0, 7) : '';
+      const afterFrom = !fromM || targetMonthStr >= fromM;
+      const beforeTo = !toM || targetMonthStr <= toM;
+      return afterFrom && beforeTo;
+    });
+
+    if (matched) {
+      return {
+        departmentId: matched.departmentId || employee.departmentId,
+        positionId: matched.positionId || employee.positionId,
+        workStatus: matched.workStatus || employee.workStatus,
+        salaryBasis: matched.salaryBasis || employee.salaryBasis,
+        baseSalary: matched.baseSalary !== undefined ? matched.baseSalary : employee.baseSalary,
+        hourlyRate: matched.hourlyRate ?? employee.hourlyRate,
+        salaryPercent: matched.salaryPercent ?? employee.salaryPercent,
+        transferLocation: matched.transferLocation || employee.transferLocation,
+        note: matched.note
+      };
+    }
+  }
+
+  // 2. Tự động xác định trạng thái dựa trên các mốc thời gian Thử việc, Thai sản, Điều chuyển, Nghỉ việc
+  let currentStatus: WorkStatus = employee.workStatus;
+  let currentBaseSalary = employee.baseSalary;
+  let currentPercent = employee.salaryPercent ?? 100;
+  let currentLocation = employee.transferLocation;
+
+  // Thử việc:
+  if (employee.probationStartDate) {
+    const probStart = employee.probationStartDate.slice(0, 7);
+    const probEnd = employee.probationEndDate ? employee.probationEndDate.slice(0, 7) : probStart;
+    if (targetMonthStr >= probStart && targetMonthStr <= probEnd) {
+      currentStatus = 'probation';
+      if (employee.salaryPercent) {
+        currentPercent = employee.salaryPercent;
+      }
+    } else if (targetMonthStr > probEnd && employee.workStatus === 'probation') {
+      // Hết thời gian thử việc -> Tự động chuyển thành Chính thức (active)
+      currentStatus = 'active';
+      currentPercent = 100;
+    }
+  }
+
+  // Nghỉ thai sản:
+  if (employee.maternityStartDate) {
+    const matStart = employee.maternityStartDate.slice(0, 7);
+    const matEnd = employee.maternityEndDate ? employee.maternityEndDate.slice(0, 7) : '9999-12';
+    if (targetMonthStr >= matStart && targetMonthStr <= matEnd) {
+      currentStatus = 'maternity';
+    } else if (targetMonthStr > matEnd && employee.workStatus === 'maternity') {
+      // Hết thời gian thai sản -> Tự động tiếp tục Chính thức (active)
+      currentStatus = 'active';
+    }
+  }
+
+  // Điều chuyển công tác:
+  if (employee.transferStartDate) {
+    const transStart = employee.transferStartDate.slice(0, 7);
+    const transEnd = employee.transferEndDate ? employee.transferEndDate.slice(0, 7) : '9999-12';
+    if (targetMonthStr >= transStart && targetMonthStr <= transEnd) {
+      currentStatus = 'transferred';
+      currentLocation = employee.transferLocation;
+    } else if (targetMonthStr > transEnd && employee.workStatus === 'transferred') {
+      // Hết thời gian điều chuyển -> Tự động trở lại Chính thức (active)
+      currentStatus = 'active';
+    }
+  }
+
+  // Nghỉ việc:
+  if (employee.resignationDate) {
+    const resMonth = employee.resignationDate.slice(0, 7);
+    if (targetMonthStr > resMonth) {
+      currentStatus = 'resigned';
+    }
+  }
+
+  return {
+    departmentId: employee.departmentId,
+    positionId: employee.positionId,
+    workStatus: currentStatus,
+    salaryBasis: employee.salaryBasis,
+    baseSalary: currentBaseSalary,
+    hourlyRate: employee.hourlyRate,
+    salaryPercent: currentPercent,
+    transferLocation: currentLocation
+  };
+};
+
+/**
  * Tính chi tiết bảng thanh toán lương cho một nhân viên trong tháng
  */
 export const calculateEmployeePayroll = (
@@ -550,6 +673,13 @@ export const calculateEmployeePayroll = (
   const standardDays = getStandardWorkDaysForMonth(settings, parsedYear, parsedMonth);
   const standardHours = settings?.standardWorkHoursPerDay || 8;
 
+  // Tra cứu thông tin chức vụ, phòng ban, trạng thái, hình thức lương và mức lương theo Quá trình làm việc tại tháng tính lương
+  const effectiveWork = getEffectiveWorkRecordForMonth(employee, parsedYear, parsedMonth);
+  const effSalaryBasis = effectiveWork.salaryBasis || employee.salaryBasis;
+  const effBaseSalary = effectiveWork.baseSalary !== undefined ? effectiveWork.baseSalary : employee.baseSalary;
+  const effHourlyRate = effectiveWork.hourlyRate ?? employee.hourlyRate;
+  const effSalaryPercent = effectiveWork.salaryPercent ?? employee.salaryPercent ?? 100;
+
   // Kiểm tra tháng có được chấm công / cập nhật bảng chấm công hay không
   const hasTkData = !!timekeeping && (
     (timekeeping.actualWorkDays !== undefined && timekeeping.actualWorkDays > 0) ||
@@ -561,14 +691,14 @@ export const calculateEmployeePayroll = (
 
   const monthIsRecorded = hasTkData || (allTimekeepings && allTimekeepings.length > 0 && isMonthTimekept(allTimekeepings, parsedMonth, parsedYear));
 
-  // 1. Tính mức lương theo ngày và giờ
-  const dailyRate = employee.salaryBasis === 'daily'
-    ? employee.baseSalary
-    : (standardDays > 0 ? (employee.baseSalary / standardDays) : 0);
+  // 1. Tính mức lương theo ngày và giờ theo Quá trình làm việc có hiệu lực tại tháng
+  const dailyRate = effSalaryBasis === 'daily'
+    ? effBaseSalary
+    : (standardDays > 0 ? (effBaseSalary / standardDays) : 0);
   const standardHourlyRate = dailyRate / (standardHours || 8);
-  const appliedHourlyRate = (employee.salaryBasis === 'hourly' && employee.hourlyRate && employee.hourlyRate > 0)
-    ? employee.hourlyRate
-    : (employee.salaryBasis === 'hourly' ? (employee.baseSalary > 0 ? employee.baseSalary : standardHourlyRate) : standardHourlyRate);
+  const appliedHourlyRate = (effSalaryBasis === 'hourly' && effHourlyRate && effHourlyRate > 0)
+    ? effHourlyRate
+    : (effSalaryBasis === 'hourly' ? (effBaseSalary > 0 ? effBaseSalary : standardHourlyRate) : standardHourlyRate);
 
   // Nếu tháng chưa được chấm công, chưa được cập nhật bảng chấm công:
   // Không tự động tính toán lương, phụ cấp, bảo hiểm và thuế TNCN (trả về 0)
@@ -583,8 +713,11 @@ export const calculateEmployeePayroll = (
       actualWorkDays: 0,
       actualWorkHours: 0,
       hourlyRateApplied: appliedHourlyRate,
-      salaryBasis: employee.salaryBasis,
-      baseSalary: employee.baseSalary,
+      salaryBasis: effSalaryBasis,
+      baseSalary: effBaseSalary,
+      effectiveDepartmentId: effectiveWork.departmentId || employee.departmentId,
+      effectivePositionId: effectiveWork.positionId || employee.positionId,
+      effectiveWorkStatus: effectiveWork.workStatus || employee.workStatus,
       mainSalary: 0,
       otPayTaxable: 0,
       otPayTaxExempt: 0,
@@ -645,19 +778,23 @@ export const calculateEmployeePayroll = (
     }
   }
 
-  // 2. Tính lương chính theo công thức chuẩn:
+  // 2. Tính lương chính theo công thức chuẩn và Quá trình làm việc:
   let mainSalary = 0;
-  if (employee.salaryBasis === 'hourly') {
+  if (effSalaryBasis === 'hourly') {
     mainSalary = Math.round(appliedHourlyRate * actualWorkHours);
-  } else if (employee.salaryBasis === 'daily') {
-    mainSalary = Math.round(employee.baseSalary * actualPaidDays);
-  } else if (employee.salaryBasis === 'monthly') {
-    mainSalary = Math.round((employee.baseSalary / (standardDays || 1)) * actualPaidDays);
-  } else if (employee.salaryBasis === 'percent') {
-    const percent = (employee.salaryPercent ?? 100) / 100;
-    mainSalary = Math.round(((employee.baseSalary * percent) / (standardDays || 1)) * actualPaidDays);
+  } else if (effSalaryBasis === 'daily') {
+    mainSalary = Math.round(effBaseSalary * actualPaidDays);
+  } else if (effSalaryBasis === 'monthly') {
+    // Nếu trong giai đoạn thử việc và hưởng % lương (ví dụ 85%)
+    const pct = (effectiveWork.workStatus === 'probation' && effSalaryPercent && effSalaryPercent < 100)
+      ? (effSalaryPercent / 100)
+      : 1;
+    mainSalary = Math.round(((effBaseSalary * pct) / (standardDays || 1)) * actualPaidDays);
+  } else if (effSalaryBasis === 'percent') {
+    const percent = (effSalaryPercent ?? 100) / 100;
+    mainSalary = Math.round(((effBaseSalary * percent) / (standardDays || 1)) * actualPaidDays);
   } else {
-    mainSalary = Math.round((employee.baseSalary / (standardDays || 1)) * actualPaidDays);
+    mainSalary = Math.round((effBaseSalary / (standardDays || 1)) * actualPaidDays);
   }
   
   // 3. Tiền làm thêm giờ (OT) & Quy định miễn thuế:
@@ -1017,9 +1154,11 @@ export const calculateEmployeePayroll = (
     actualWorkDays: timekeeping?.actualWorkDays ?? actualPaidDays,
     actualWorkHours,
     hourlyRateApplied: appliedHourlyRate,
-    salaryBasis: employee.salaryBasis,
-
-    baseSalary: employee.baseSalary,
+    salaryBasis: effSalaryBasis,
+    baseSalary: effBaseSalary,
+    effectiveDepartmentId: effectiveWork.departmentId || employee.departmentId,
+    effectivePositionId: effectiveWork.positionId || employee.positionId,
+    effectiveWorkStatus: effectiveWork.workStatus || employee.workStatus,
 
     mainSalary,
     otPayTaxable,
@@ -1081,8 +1220,97 @@ export const formatNumber = (num: number | undefined | null): string => {
 };
 
 /**
+ * Tự động tạo / đồng bộ quá trình làm việc hoàn chỉnh cho người lao động từ các mốc thời gian
+ * Thử việc, HĐ chính thức, Điều chuyển công tác, Nghỉ thai sản, Nghỉ việc.
+ */
+export const syncEmployeeWorkHistory = (employee: Employee): WorkHistoryItem[] => {
+  const existingHistory = employee.workHistory ? [...employee.workHistory] : [];
+  
+  if (existingHistory.length === 0) {
+    return [];
+  }
+
+  const sorted = [...existingHistory].sort((a, b) => (a.fromMonth || '').localeCompare(b.fromMonth || ''));
+
+  // 1. Kiểm tra nếu có giai đoạn thử việc đã kết thúc mà chưa có giai đoạn kế tiếp
+  const probItem = sorted.find(i => i.workStatus === 'probation' && i.toMonth);
+  if (probItem && probItem.toMonth) {
+    const hasAfterProb = sorted.some(i => (i.fromMonth || '') > probItem.toMonth!);
+    if (!hasAfterProb) {
+      const [pYear, pMonth] = probItem.toMonth.split('-').map(Number);
+      const nextDate = new Date(pYear, pMonth, 1);
+      const nextMonthStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+      sorted.push({
+        id: `wh-postprob-${employee.id}-${Date.now()}`,
+        fromMonth: nextMonthStr,
+        toMonth: undefined,
+        departmentId: employee.departmentId,
+        positionId: employee.positionId,
+        workStatus: 'active',
+        salaryBasis: employee.salaryBasis,
+        baseSalary: employee.baseSalary,
+        hourlyRate: employee.hourlyRate,
+        salaryPercent: 100,
+        note: 'Chuyển sang làm việc chính thức sau khi hết thời gian thử việc'
+      });
+    }
+  }
+
+  // 2. Kiểm tra nếu có giai đoạn điều chuyển công tác đã kết thúc mà chưa có giai đoạn kế tiếp
+  const transItem = sorted.find(i => i.workStatus === 'transferred' && i.toMonth);
+  if (transItem && transItem.toMonth) {
+    const hasAfterTrans = sorted.some(i => (i.fromMonth || '') > transItem.toMonth!);
+    if (!hasAfterTrans) {
+      const [tYear, tMonth] = transItem.toMonth.split('-').map(Number);
+      const nextDate = new Date(tYear, tMonth, 1);
+      const nextMonthStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+      sorted.push({
+        id: `wh-posttrans-${employee.id}-${Date.now()}`,
+        fromMonth: nextMonthStr,
+        toMonth: undefined,
+        departmentId: employee.departmentId,
+        positionId: employee.positionId,
+        workStatus: 'active',
+        salaryBasis: employee.salaryBasis,
+        baseSalary: employee.baseSalary,
+        hourlyRate: employee.hourlyRate,
+        salaryPercent: 100,
+        note: 'Quay lại công tác chính thức sau khi hết thời gian điều chuyển'
+      });
+    }
+  }
+
+  // 3. Kiểm tra nếu có giai đoạn nghỉ thai sản đã kết thúc mà chưa có giai đoạn kế tiếp
+  const matItem = sorted.find(i => i.workStatus === 'maternity' && i.toMonth);
+  if (matItem && matItem.toMonth) {
+    const hasAfterMat = sorted.some(i => (i.fromMonth || '') > matItem.toMonth!);
+    if (!hasAfterMat) {
+      const [mYear, mMonth] = matItem.toMonth.split('-').map(Number);
+      const nextDate = new Date(mYear, mMonth, 1);
+      const nextMonthStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+      sorted.push({
+        id: `wh-postmat-${employee.id}-${Date.now()}`,
+        fromMonth: nextMonthStr,
+        toMonth: undefined,
+        departmentId: employee.departmentId,
+        positionId: employee.positionId,
+        workStatus: 'active',
+        salaryBasis: employee.salaryBasis,
+        baseSalary: employee.baseSalary,
+        hourlyRate: employee.hourlyRate,
+        salaryPercent: 100,
+        note: 'Tiếp tục làm việc chính thức sau khi kết thúc thời gian nghỉ thai sản'
+      });
+    }
+  }
+
+  return sorted.sort((a, b) => (a.fromMonth || '').localeCompare(b.fromMonth || ''));
+};
+
+/**
  * Kiểm tra xem người lao động có làm việc và phát sinh công/lương trong tháng cụ thể hay không.
  * Nếu đã nghỉ việc, điều chuyển công tác, nghỉ thai sản sẽ không hiện thông tin các tháng không liên quan.
+ * Đồng bộ chính xác với Quá trình làm việc và các mốc thời gian.
  * @param employee Hồ sơ nhân viên
  * @param month Tháng (1 - 12)
  * @param year Năm (vd: 2026)
@@ -1102,52 +1330,18 @@ export const isEmployeeActiveInMonth = (
     }
   }
 
-  // 2. Trạng thái Thử việc
-  if (employee.workStatus === 'probation') {
-    if (employee.probationStartDate) {
-      const probStartMonth = employee.probationStartDate.slice(0, 7);
-      if (targetMonthStr < probStartMonth) {
-        return false;
-      }
-    }
-  }
+  // 2. Tra cứu trạng thái làm việc có hiệu lực trong tháng theo Quá trình làm việc
+  const effective = getEffectiveWorkRecordForMonth(employee, year, month);
 
-  // 3. Trạng thái Đã nghỉ việc
-  // Tháng nghỉ việc vẫn tính công/lương đến ngày nghỉ; các tháng sau khi nghỉ việc KHÔNG hiển thị
-  if (employee.workStatus === 'resigned') {
-    if (employee.resignationDate) {
-      const resMonth = employee.resignationDate.slice(0, 7);
-      if (targetMonthStr > resMonth) {
-        return false;
-      }
-    } else {
-      // Nếu trạng thái đã là resigned nhưng chưa nhập ngày, mặc định không hiển thị
-      return false;
-    }
+  // Không hiển thị nếu trong tháng này đã nghỉ việc, đang nghỉ thai sản hoặc đang điều chuyển
+  if (effective.workStatus === 'resigned') {
+    return false;
   }
-
-  // 4. Trạng thái Nghỉ thai sản
-  // Không hiện thông tin người lao động trong các tháng nằm trong thời gian nghỉ thai sản (hưởng BHXH, không hưởng lương cty)
-  if (employee.workStatus === 'maternity') {
-    if (employee.maternityStartDate) {
-      const matStartMonth = employee.maternityStartDate.slice(0, 7);
-      const matEndMonth = employee.maternityEndDate ? employee.maternityEndDate.slice(0, 7) : '9999-12';
-      if (targetMonthStr >= matStartMonth && targetMonthStr <= matEndMonth) {
-        return false;
-      }
-    }
+  if (effective.workStatus === 'maternity') {
+    return false;
   }
-
-  // 5. Trạng thái Điều chuyển công tác
-  // Không hiện thông tin người lao động trong các tháng nằm trong thời gian điều chuyển công tác đi đơn vị khác
-  if (employee.workStatus === 'transferred') {
-    if (employee.transferStartDate) {
-      const transStartMonth = employee.transferStartDate.slice(0, 7);
-      const transEndMonth = employee.transferEndDate ? employee.transferEndDate.slice(0, 7) : '9999-12';
-      if (targetMonthStr >= transStartMonth && targetMonthStr <= transEndMonth) {
-        return false;
-      }
-    }
+  if (effective.workStatus === 'transferred') {
+    return false;
   }
 
   return true;

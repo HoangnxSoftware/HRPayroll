@@ -15,7 +15,9 @@ import {
   TaxBracket,
   TaxExemptionRules,
   FixedDaysOffPolicy,
-  SalaryCalculationBasis
+  SalaryCalculationBasis,
+  WorkHistoryItem,
+  InsuranceSalaryHistory
 } from '../types';
 import { DEFAULT_TAX_BRACKETS, DEFAULT_TAX_EXEMPTION_RULES } from '../utils/payrollCalculator';
 
@@ -55,6 +57,8 @@ export const SHEET_NAMES = [
   'NgayNghi_LeTet',
   'BieuThue_TNCN',
   'DanhSach_NhanVien',
+  'QuaTrinh_LamViec',
+  'QuaTrinh_BHXH',
   'NguoiPhuThuoc',
   'BaoHiemXaHoi',
   'DangKy_AnCa',
@@ -566,6 +570,14 @@ export const exportDataToGoogleSheets = async (
     'Chức Vụ',
     'Trạng Thái Công Việc',
     'Ngày Vào Làm',
+    'Thử Việc Từ Ngày',
+    'Thử Việc Đến Ngày',
+    'Ngày Chính Thức Nghỉ Việc',
+    'Điều Chuyển Từ Ngày',
+    'Điều Chuyển Đến Ngày',
+    'Đơn Vị/Chi Nhánh Điều Chuyển',
+    'Nghỉ Thai Sản Từ Ngày',
+    'Nghỉ Thai Sản Đến Ngày',
     'Hình Thức Lương',
     'Mức Lương Cơ Bản / Thỏa Thuận (VNĐ)',
     '% Lương (nếu có)',
@@ -599,6 +611,14 @@ export const exportDataToGoogleSheets = async (
         emp.workStatus === 'resigned' ? 'Đã nghỉ việc' :
         emp.workStatus === 'transferred' ? 'Điều chuyển' : 'Nghỉ thai sản',
       emp.startDate,
+      emp.probationStartDate || '',
+      emp.probationEndDate || '',
+      emp.resignationDate || '',
+      emp.transferStartDate || '',
+      emp.transferEndDate || '',
+      emp.transferLocation || '',
+      emp.maternityStartDate || '',
+      emp.maternityEndDate || '',
       emp.salaryBasis === 'monthly' ? 'Lương tháng' :
         emp.salaryBasis === 'daily' ? 'Theo ngày công' :
         emp.salaryBasis === 'hourly' ? 'Theo giờ' :
@@ -610,6 +630,104 @@ export const exportDataToGoogleSheets = async (
       emp.taxId || '',
       emp.id
     ])
+  ];
+
+  // 3.6b Sheet QuaTrinh_LamViec (Quá trình làm việc / lịch sử công tác)
+  const workHistoryHeader = [
+    'Mã Nhân Viên',
+    'Họ và Tên',
+    'Số Căn Cước (CCCD)',
+    'Từ Tháng (Bắt đầu)',
+    'Đến Tháng (Kết thúc)',
+    'Phòng Ban',
+    'Chức Vụ',
+    'Trạng Thái Công Việc',
+    'Hình Thức Tính Lương',
+    'Mức Lương Cơ Bản (VNĐ)',
+    '% Lương',
+    'Đơn Giá Giờ (VNĐ)',
+    'Đơn Vị / Chi Nhánh Đến',
+    'Lý Do / Quyết Định / Căn Cứ',
+    'ID Giai Đoạn',
+    'ID Nhân Viên'
+  ];
+
+  const workHistoryDataRows: string[][] = [];
+  data.employees.forEach(emp => {
+    const list = emp.workHistory || [];
+    list.forEach(item => {
+      const statusLabel = item.workStatus === 'active' ? 'Chính thức' :
+        item.workStatus === 'probation' ? 'Thử việc' :
+        item.workStatus === 'transferred' ? 'Điều chuyển công tác' :
+        item.workStatus === 'maternity' ? 'Nghỉ thai sản' : 'Đã nghỉ việc';
+      const basisLabel = item.salaryBasis === 'monthly' ? 'Lương tháng' :
+        item.salaryBasis === 'daily' ? 'Lương ngày công' :
+        item.salaryBasis === 'hourly' ? 'Lương theo giờ' :
+        item.salaryBasis === 'percent' ? 'Lương theo KPI %' : 'Theo bộ phận';
+      workHistoryDataRows.push([
+        emp.employeeCode,
+        emp.fullName,
+        emp.idCardNumber,
+        item.fromMonth,
+        item.toMonth || 'Đang áp dụng đến nay',
+        depMap.get(item.departmentId) || item.departmentId,
+        posMap.get(item.positionId) || item.positionId,
+        statusLabel,
+        basisLabel,
+        String(item.baseSalary),
+        String(item.salaryPercent ?? 100),
+        String(item.hourlyRate || 0),
+        item.transferLocation || '',
+        item.note || '',
+        item.id,
+        emp.id
+      ]);
+    });
+  });
+
+  const workHistoryRows = [
+    workHistoryHeader,
+    ...workHistoryDataRows
+  ];
+
+  // 3.6c Sheet QuaTrinh_BHXH (Quá trình tham gia / đóng BHXH qua các thời kỳ)
+  const insuranceHistoryHeader = [
+    'Mã Nhân Viên',
+    'Họ và Tên',
+    'Số Căn Cước (CCCD)',
+    'Từ Tháng (Bắt đầu)',
+    'Đến Tháng (Kết thúc)',
+    'Mức Lương Đóng BHXH (VNĐ)',
+    'Lý Do / Căn Cứ Điều Chỉnh',
+    'Đang Áp Dụng',
+    'ID Giai Đoạn',
+    'ID Nhân Viên'
+  ];
+
+  const insuranceHistoryDataRows: string[][] = [];
+  data.insurances.forEach(ins => {
+    const emp = data.employees.find(e => e.id === ins.employeeId);
+    if (!emp) return;
+    const historyList = ins.history || [];
+    historyList.forEach(h => {
+      insuranceHistoryDataRows.push([
+        emp.employeeCode,
+        emp.fullName,
+        emp.idCardNumber,
+        h.fromMonth,
+        h.toMonth || 'Đang áp dụng đến nay',
+        String(h.salary),
+        h.note || '',
+        !h.toMonth ? 'Hiện hành' : 'Lịch sử',
+        h.id,
+        emp.id
+      ]);
+    });
+  });
+
+  const insuranceHistoryRows = [
+    insuranceHistoryHeader,
+    ...insuranceHistoryDataRows
   ];
 
   // 3.7 Sheet NguoiPhuThuoc
@@ -1045,7 +1163,7 @@ export const exportDataToGoogleSheets = async (
     console.warn('Lưu ý thiết lập định dạng TEXT cho sheet:', fmtErr);
   }
 
-  // 6. Gửi toàn bộ 12 bảng dữ liệu bằng API values:batchUpdate duy nhất với valueInputOption: 'RAW'
+  // 6. Gửi toàn bộ 14 bảng dữ liệu bằng API values:batchUpdate duy nhất với valueInputOption: 'RAW'
   // RAW đảm bảo Google Sheets lưu trữ nguyên bản toàn bộ dưới dạng TEXT, không tự động parse số hay ngày tháng!
   const updates = [
     { range: 'HeThong_CaiDat!A1', values: settingsRows },
@@ -1054,6 +1172,8 @@ export const exportDataToGoogleSheets = async (
     { range: 'NgayNghi_LeTet!A1', values: holidayRows },
     { range: 'BieuThue_TNCN!A1', values: taxBracketRows },
     { range: 'DanhSach_NhanVien!A1', values: employeeRows },
+    { range: 'QuaTrinh_LamViec!A1', values: workHistoryRows },
+    { range: 'QuaTrinh_BHXH!A1', values: insuranceHistoryRows },
     { range: 'NguoiPhuThuoc!A1', values: dependentRows },
     { range: 'BaoHiemXaHoi!A1', values: insuranceRows },
     { range: 'DangKy_AnCa!A1', values: mealRows },
@@ -1507,7 +1627,7 @@ export const importFullDataFromGoogleSheets = async (
 
   // 6. Đọc danh sách nhân viên (DanhSach_NhanVien)
   try {
-    const rawEmpRows = await fetchValues('DanhSach_NhanVien!A1:Z500');
+    const rawEmpRows = await fetchValues('DanhSach_NhanVien!A1:AH500');
     if (rawEmpRows.length > 0) {
       // Nhận diện dòng tiêu đề cột
       const firstRow = rawEmpRows[0].map(c => String(c || '').trim().toLowerCase());
@@ -1540,6 +1660,16 @@ export const importFullDataFromGoogleSheets = async (
       const posIdx = findColIdx(['chức vụ'], hasNewCols ? 12 : 10);
       const statusIdx = findColIdx(['trạng thái'], hasNewCols ? 13 : 11);
       const startIdx = findColIdx(['ngày vào làm', 'ngày vào'], hasNewCols ? 14 : 12);
+
+      const probStartIdx = findColIdx(['thử việc từ', 'thử việc bắt đầu'], -1);
+      const probEndIdx = findColIdx(['thử việc đến', 'thử việc kết thúc'], -1);
+      const resDateIdx = findColIdx(['ngày chính thức nghỉ việc', 'ngày nghỉ việc', 'chính thức nghỉ việc', 'ngày nghỉ'], -1);
+      const transStartIdx = findColIdx(['điều chuyển từ', 'điều chuyển bắt đầu'], -1);
+      const transEndIdx = findColIdx(['điều chuyển đến ngày', 'điều chuyển đến', 'điều chuyển kết thúc'], -1);
+      const transLocIdx = findColIdx(['đơn vị/chi nhánh điều chuyển', 'chi nhánh điều chuyển', 'nơi điều chuyển', 'đơn vị đến'], -1);
+      const matStartIdx = findColIdx(['nghỉ thai sản từ', 'thai sản từ'], -1);
+      const matEndIdx = findColIdx(['nghỉ thai sản đến', 'thai sản đến'], -1);
+
       const basisIdx = findColIdx(['hình thức lương', 'loại lương'], hasNewCols ? 15 : 13);
       const salaryIdx = findColIdx(['mức lương', 'lương cơ bản', 'lương thỏa thuận'], hasNewCols ? 16 : 14);
       const percentIdx = findColIdx(['% lương', 'tỷ lệ lương', 'phần trăm'], hasNewCols ? 17 : 15);
@@ -1573,6 +1703,15 @@ export const importFullDataFromGoogleSheets = async (
             : basisStr.includes('giờ') ? 'hourly'
             : basisStr.includes('kpi') || basisStr.includes('phần trăm') ? 'percent' : 'monthly';
 
+          const probStart = probStartIdx !== -1 && row[probStartIdx] ? String(row[probStartIdx]).trim() : undefined;
+          const probEnd = probEndIdx !== -1 && row[probEndIdx] ? String(row[probEndIdx]).trim() : undefined;
+          const resDate = resDateIdx !== -1 && row[resDateIdx] ? String(row[resDateIdx]).trim() : undefined;
+          const transStart = transStartIdx !== -1 && row[transStartIdx] ? String(row[transStartIdx]).trim() : undefined;
+          const transEnd = transEndIdx !== -1 && row[transEndIdx] ? String(row[transEndIdx]).trim() : undefined;
+          const transLoc = transLocIdx !== -1 && row[transLocIdx] ? String(row[transLocIdx]).trim() : undefined;
+          const matStart = matStartIdx !== -1 && row[matStartIdx] ? String(row[matStartIdx]).trim() : undefined;
+          const matEnd = matEndIdx !== -1 && row[matEndIdx] ? String(row[matEndIdx]).trim() : undefined;
+
           return {
             id: row[idIdx] ? String(row[idIdx]).trim() : `emp-g-${idx + 1}`,
             employeeCode: String(row[codeIdx] || `NV-${idx + 1}`).trim(),
@@ -1590,6 +1729,14 @@ export const importFullDataFromGoogleSheets = async (
             positionId: posId,
             workStatus,
             startDate: String(row[startIdx] || '2024-01-01').trim(),
+            probationStartDate: probStart || undefined,
+            probationEndDate: probEnd || undefined,
+            resignationDate: resDate || undefined,
+            transferStartDate: transStart || undefined,
+            transferEndDate: transEnd || undefined,
+            transferLocation: transLoc || undefined,
+            maternityStartDate: matStart || undefined,
+            maternityEndDate: matEnd || undefined,
             salaryBasis,
             baseSalary: Number(String(row[salaryIdx] || '0').replace(/[^\d.-]/g, '')) || 10000000,
             salaryPercent: Number(row[percentIdx]) || 100,
@@ -1605,6 +1752,80 @@ export const importFullDataFromGoogleSheets = async (
 
   // Tra cứu mã nhân viên sang ID nhân viên
   const codeToEmpId = new Map(result.employees?.map(e => [e.employeeCode.toLowerCase(), e.id]) || []);
+
+  // 6b. Đọc Quá Trình Làm Việc (QuaTrinh_LamViec)
+  try {
+    const workHistRows = await fetchValues('QuaTrinh_LamViec!A2:P500');
+    if (workHistRows.length > 0 && result.employees) {
+      const empHistMap = new Map<string, WorkHistoryItem[]>();
+      workHistRows.forEach((r, idx) => {
+        if (!r || (!r[0] && !r[15])) return;
+        const empCodePart = String(r[0] || '').trim().toLowerCase();
+        const empIdPart = String(r[15] || '').trim();
+        const targetEmp = result.employees?.find(e => 
+          (empIdPart && e.id === empIdPart) || 
+          (empCodePart && e.employeeCode.toLowerCase() === empCodePart)
+        );
+        if (!targetEmp) return;
+
+        const fromMonth = String(r[3] || '').trim();
+        if (!fromMonth) return;
+        const toMonthRaw = String(r[4] || '').trim();
+        const toMonth = (toMonthRaw.includes('áp dụng') || toMonthRaw.includes('hiện tại') || toMonthRaw.includes('nay')) ? undefined : toMonthRaw;
+
+        const depInput = String(r[5] || '').trim().toLowerCase();
+        const posInput = String(r[6] || '').trim().toLowerCase();
+        const depId = depNameToId.get(depInput) || depCodeToId.get(depInput) || targetEmp.departmentId;
+        const posId = posNameToId.get(posInput) || posCodeToId.get(posInput) || targetEmp.positionId;
+
+        const statusStr = String(r[7] || '').toLowerCase();
+        const workStatus = statusStr.includes('thử') ? 'probation'
+          : statusStr.includes('chuyển') ? 'transferred'
+          : statusStr.includes('thai sản') ? 'maternity'
+          : statusStr.includes('nghỉ việc') || statusStr.includes('đã nghỉ') ? 'resigned' : 'active';
+
+        const basisStr = String(r[8] || '').toLowerCase();
+        const salaryBasis = basisStr.includes('ngày') ? 'daily'
+          : basisStr.includes('giờ') ? 'hourly'
+          : basisStr.includes('kpi') || basisStr.includes('phần trăm') ? 'percent' : 'monthly';
+
+        const baseSalary = Number(String(r[9] || '0').replace(/[^\d.-]/g, '')) || targetEmp.baseSalary;
+        const salaryPercent = Number(r[10]) || 100;
+        const hourlyRate = Number(String(r[11] || '0').replace(/[^\d.-]/g, '')) || 0;
+        const transferLocation = String(r[12] || '').trim() || undefined;
+        const note = String(r[13] || '').trim();
+        const id = r[14] ? String(r[14]).trim() : `wh-${targetEmp.id}-${idx}`;
+
+        const item: WorkHistoryItem = {
+          id,
+          fromMonth,
+          toMonth,
+          departmentId: depId,
+          positionId: posId,
+          workStatus,
+          salaryBasis,
+          baseSalary,
+          salaryPercent,
+          hourlyRate,
+          transferLocation,
+          note
+        };
+
+        if (!empHistMap.has(targetEmp.id)) {
+          empHistMap.set(targetEmp.id, []);
+        }
+        empHistMap.get(targetEmp.id)!.push(item);
+      });
+
+      result.employees.forEach(emp => {
+        if (empHistMap.has(emp.id)) {
+          emp.workHistory = empHistMap.get(emp.id)!.sort((a, b) => (a.fromMonth || '').localeCompare(b.fromMonth || ''));
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Lỗi đọc QuaTrinh_LamViec:', err);
+  }
 
   // 7. Đọc Người Phụ Thuộc (NguoiPhuThuoc)
   try {
@@ -1655,6 +1876,53 @@ export const importFullDataFromGoogleSheets = async (
     }
   } catch (err) {
     console.warn('Lỗi đọc BaoHiemXaHoi:', err);
+  }
+
+  // 8b. Đọc Quá Trình Tham Gia BHXH (QuaTrinh_BHXH)
+  try {
+    const insHistRows = await fetchValues('QuaTrinh_BHXH!A2:J500');
+    if (insHistRows.length > 0 && result.insurances) {
+      const insHistMap = new Map<string, InsuranceSalaryHistory[]>();
+      insHistRows.forEach((r, idx) => {
+        if (!r || (!r[0] && !r[9])) return;
+        const empCodePart = String(r[0] || '').trim().toLowerCase();
+        const empIdPart = String(r[9] || '').trim();
+        const targetEmp = result.employees?.find(e => 
+          (empIdPart && e.id === empIdPart) || 
+          (empCodePart && e.employeeCode.toLowerCase() === empCodePart)
+        );
+        if (!targetEmp) return;
+
+        const fromMonth = String(r[3] || '').trim();
+        if (!fromMonth) return;
+        const toMonthRaw = String(r[4] || '').trim();
+        const toMonth = (toMonthRaw.includes('áp dụng') || toMonthRaw.includes('hiện tại') || toMonthRaw.includes('nay')) ? undefined : toMonthRaw;
+        const salary = Number(String(r[5] || '0').replace(/[^\d.-]/g, '')) || 0;
+        const note = String(r[6] || '').trim();
+        const id = r[8] ? String(r[8]).trim() : `insh-${targetEmp.id}-${idx}`;
+
+        const item: InsuranceSalaryHistory = {
+          id,
+          fromMonth,
+          toMonth,
+          salary,
+          note
+        };
+
+        if (!insHistMap.has(targetEmp.id)) {
+          insHistMap.set(targetEmp.id, []);
+        }
+        insHistMap.get(targetEmp.id)!.push(item);
+      });
+
+      result.insurances.forEach(ins => {
+        if (insHistMap.has(ins.employeeId)) {
+          ins.history = insHistMap.get(ins.employeeId)!.sort((a, b) => (a.fromMonth || '').localeCompare(b.fromMonth || ''));
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Lỗi đọc QuaTrinh_BHXH:', err);
   }
 
   // 9. Đọc Đăng Ký Ăn Ca (DangKy_AnCa)

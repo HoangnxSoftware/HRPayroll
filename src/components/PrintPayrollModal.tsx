@@ -62,7 +62,7 @@ export const PrintPayrollModal: React.FC<PrintPayrollModalProps> = ({
 
     (payrolls || []).forEach(p => {
       const emp = empMap.get(p.employeeId);
-      const depId = emp?.departmentId;
+      const depId = p.effectiveDepartmentId || emp?.departmentId;
       if (depId && map.has(depId)) {
         map.get(depId)!.payrolls.push(p);
       } else {
@@ -230,12 +230,12 @@ export const PrintPayrollModal: React.FC<PrintPayrollModalProps> = ({
                     )}
                   </td>
                   <td className="border border-slate-300 p-1 text-left font-semibold">{emp?.fullName || ''}</td>
-                  <td className="border border-slate-300 p-1 text-left">{posMap.get(emp?.positionId || '') || ''}</td>
+                  <td className="border border-slate-300 p-1 text-left">{posMap.get(p.effectivePositionId || emp?.positionId || '') || ''}</td>
                   <td className="border border-slate-300 p-1 text-left font-medium text-slate-800">
-                    {emp?.salaryBasis === 'monthly' ? 'Lương tháng' :
-                     emp?.salaryBasis === 'daily' ? 'Theo ngày công' :
-                     emp?.salaryBasis === 'hourly' ? 'Theo giờ' :
-                     emp?.salaryBasis === 'percent' ? `Theo KPI (${emp.salaryPercent || 100}%)` :
+                    {(p.salaryBasis || emp?.salaryBasis) === 'monthly' ? 'Lương tháng' :
+                     (p.salaryBasis || emp?.salaryBasis) === 'daily' ? 'Theo ngày công' :
+                     (p.salaryBasis || emp?.salaryBasis) === 'hourly' ? 'Theo giờ' :
+                     (p.salaryBasis || emp?.salaryBasis) === 'percent' ? `Theo KPI (${emp?.salaryPercent || 100}%)` :
                      'Theo bộ phận'}
                   </td>
                   <td className="border border-slate-300 p-1 text-right font-mono">{formatVND(p.baseSalary)}</td>

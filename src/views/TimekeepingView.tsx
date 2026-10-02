@@ -41,7 +41,7 @@ import {
   MealRegistration
 } from '../types';
 import { exportTimekeepingToExcel, exportMealAttendanceToExcel, exportOvertimeLogsToExcel } from '../utils/excelHelper';
-import { recalculateTimekeepingSummary, isEmployeeActiveInMonth, isMonthTimekept, getAvailableYears } from '../utils/payrollCalculator';
+import { recalculateTimekeepingSummary, isEmployeeActiveInMonth, isMonthTimekept, getAvailableYears, getEffectiveWorkRecordForMonth } from '../utils/payrollCalculator';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintTimekeepingModal } from '../components/PrintTimekeepingModal';
 import { 
@@ -1629,7 +1629,20 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
                         </td>
                         <td className="p-2 text-left font-semibold text-slate-900 border-r border-slate-200 sticky left-[160px] bg-white z-10 whitespace-nowrap">
                           <div>{emp.fullName}</div>
-                          <div className="text-[10px] text-slate-400 font-normal">{depMap.get(emp.departmentId)}</div>
+                          {(() => {
+                            const eff = getEffectiveWorkRecordForMonth(emp, year, month);
+                            return (
+                              <div className="text-[10px] text-slate-500 font-normal flex items-center gap-1 mt-0.5">
+                                <span>{depMap.get(eff.departmentId) || depMap.get(emp.departmentId)}</span>
+                                {eff.workStatus === 'probation' && (
+                                  <span className="px-1 py-0.2 rounded bg-amber-100 text-amber-800 text-[9px] font-bold">Thử việc</span>
+                                )}
+                                {eff.workStatus === 'transferred' && (
+                                  <span className="px-1 py-0.2 rounded bg-blue-100 text-blue-800 text-[9px] font-bold">Điều chuyển</span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* Day Cells */}

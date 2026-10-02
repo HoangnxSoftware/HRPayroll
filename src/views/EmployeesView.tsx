@@ -18,10 +18,15 @@ import {
   Check,
   X,
   AlertTriangle,
-  FileText
+  FileText,
+  History,
+  Clock,
+  Plus,
+  Save,
+  TrendingUp
 } from 'lucide-react';
-import { Employee, Department, Position, SystemSettings } from '../types';
-import { formatVND, getEmployeeWorkStatusDetails } from '../utils/payrollCalculator';
+import { Employee, Department, Position, SystemSettings, WorkHistoryItem, WorkStatus, SalaryCalculationBasis } from '../types';
+import { formatVND, getEmployeeWorkStatusDetails, syncEmployeeWorkHistory } from '../utils/payrollCalculator';
 import { exportEmployeesToExcel, downloadEmployeeTemplate, readEmployeeExcel } from '../utils/excelHelper';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintEmployeesModal } from '../components/PrintEmployeesModal';
@@ -37,6 +42,7 @@ interface EmployeesViewProps {
   onDeleteEmployee: (id: string) => void;
   onImportEmployees: (newEmployees: Partial<Employee>[]) => void;
   onUpdateEmployeeSalary?: (employeeId: string, newSalary: number) => void;
+  onUpdateEmployee?: (employee: Employee) => void;
   onUpdateSettings?: (newSettings: SystemSettings) => void;
 }
 
@@ -50,6 +56,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   onDeleteEmployee,
   onImportEmployees,
   onUpdateEmployeeSalary,
+  onUpdateEmployee,
   onUpdateSettings
 }) => {
   const { canEditEmployees, canExportData } = useAuthRole();
@@ -125,6 +132,190 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
 
   const depMap = new Map(departments.map(d => [d.id, d.name]));
   const posMap = new Map(positions.map(p => [p.id, p.name]));
+
+  // Quản lý quá trình làm việc / lịch sử công tác qua các thời kỳ (tương tự Quá trình đóng BHXH)
+  const [workHistoryTarget, setWorkHistoryTarget] = useState<Employee | null>(null);
+  const [workHistoryForm, setWorkHistoryForm] = useState<{
+    editingId: string | null;
+    fromMonth: string;
+    toMonth: string;
+    isOngoing: boolean;
+    departmentId: string;
+    positionId: string;
+    workStatus: WorkStatus;
+    salaryBasis: SalaryCalculationBasis;
+    baseSalary: number;
+    salaryPercent: number;
+    hourlyRate: number;
+    transferLocation: string;
+    note: string;
+  }>({
+    editingId: null,
+    fromMonth: new Date().toISOString().slice(0, 7),
+    toMonth: '',
+    isOngoing: true,
+    departmentId: departments[0]?.id || '',
+    positionId: positions[0]?.id || '',
+    workStatus: 'active',
+    salaryBasis: 'monthly',
+    baseSalary: 10000000,
+    salaryPercent: 100,
+    hourlyRate: 50000,
+    transferLocation: '',
+    note: ''
+  });
+  const [workHistorySuccessMsg, setWorkHistorySuccessMsg] = useState<string | null>(null);
+
+  const targetHistory: WorkHistoryItem[] = useMemo(() => {
+    if (!workHistoryTarget) return [];
+    if (workHistoryTarget.workHistory && workHistoryTarget.workHistory.length > 0) {
+      return [...workHistoryTarget.workHistory].sort((a, b) => (a.fromMonth || '').localeCompare(b.fromMonth || ''));
+    }
+    return [];
+  }, [workHistoryTarget]);
+
+  const resetWorkHistoryForm = () => {
+    if (!workHistoryTarget) return;
+    setWorkHistoryForm({
+      editingId: null,
+      fromMonth: new Date().toISOString().slice(0, 7),
+      toMonth: '',
+      isOngoing: true,
+      departmentId: workHistoryTarget.departmentId || departments[0]?.id || '',
+      positionId: workHistoryTarget.positionId || positions[0]?.id || '',
+      workStatus: workHistoryTarget.workStatus || 'active',
+      salaryBasis: workHistoryTarget.salaryBasis || 'monthly',
+      baseSalary: workHistoryTarget.baseSalary || 10000000,
+      salaryPercent: workHistoryTarget.salaryPercent ?? 100,
+      hourlyRate: workHistoryTarget.hourlyRate || 50000,
+      transferLocation: workHistoryTarget.transferLocation || '',
+      note: ''
+    });
+  };
+
+  const handleOpenWorkHistory = (emp: Employee) => {
+    setWorkHistoryTarget(emp);
+    setWorkHistorySuccessMsg(null);
+    setWorkHistoryForm({
+      editingId: null,
+      fromMonth: emp.startDate ? emp.startDate.slice(0, 7) : new Date().toISOString().slice(0, 7),
+      toMonth: '',
+      isOngoing: true,
+      departmentId: emp.departmentId || departments[0]?.id || '',
+      positionId: emp.positionId || positions[0]?.id || '',
+      workStatus: emp.workStatus || 'active',
+      salaryBasis: emp.salaryBasis || 'monthly',
+      baseSalary: emp.baseSalary || 10000000,
+      salaryPercent: emp.salaryPercent ?? 100,
+      hourlyRate: emp.hourlyRate || 50000,
+      transferLocation: emp.transferLocation || '',
+      note: ''
+    });
+  };
+
+  const handleEditWorkHistoryItem = (item: WorkHistoryItem) => {
+    setWorkHistoryForm({
+      editingId: item.id,
+      fromMonth: item.fromMonth ? item.fromMonth.slice(0, 7) : '',
+      toMonth: item.toMonth ? item.toMonth.slice(0, 7) : '',
+      isOngoing: !item.toMonth,
+      departmentId: item.departmentId,
+      positionId: item.positionId,
+      workStatus: item.workStatus,
+      salaryBasis: item.salaryBasis,
+      baseSalary: item.baseSalary,
+      salaryPercent: item.salaryPercent ?? 100,
+      hourlyRate: item.hourlyRate || 50000,
+      transferLocation: item.transferLocation || '',
+      note: item.note || ''
+    });
+    setWorkHistorySuccessMsg(null);
+  };
+
+  const handleSaveWorkHistoryItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!workHistoryTarget) return;
+
+    const newItem: WorkHistoryItem = {
+      id: workHistoryForm.editingId || `wh-${workHistoryTarget.id}-${Date.now()}`,
+      fromMonth: workHistoryForm.fromMonth,
+      toMonth: workHistoryForm.isOngoing ? undefined : (workHistoryForm.toMonth || undefined),
+      departmentId: workHistoryForm.departmentId,
+      positionId: workHistoryForm.positionId,
+      workStatus: workHistoryForm.workStatus,
+      salaryBasis: workHistoryForm.salaryBasis,
+      baseSalary: Number(workHistoryForm.baseSalary) || 0,
+      salaryPercent: Number(workHistoryForm.salaryPercent) || 100,
+      hourlyRate: Number(workHistoryForm.hourlyRate) || 0,
+      transferLocation: workHistoryForm.transferLocation || undefined,
+      note: workHistoryForm.note || undefined
+    };
+
+    const currentHistory = workHistoryTarget.workHistory ? [...workHistoryTarget.workHistory] : [];
+    let updatedHistory: WorkHistoryItem[] = [];
+
+    if (workHistoryForm.editingId) {
+      updatedHistory = currentHistory.map(h => h.id === workHistoryForm.editingId ? newItem : h);
+    } else {
+      updatedHistory = [...currentHistory, newItem];
+    }
+
+    updatedHistory.sort((a, b) => (a.fromMonth || '').localeCompare(b.fromMonth || ''));
+
+    // Tự động kiểm tra và thêm trạng thái chính thức kế tiếp nếu giai đoạn thử việc/điều chuyển/thai sản vừa lưu đã kết thúc
+    const autoSyncedHistory = syncEmployeeWorkHistory({
+      ...workHistoryTarget,
+      workHistory: updatedHistory
+    });
+
+    // Nếu giai đoạn này đang áp dụng đến nay -> cập nhật thông tin hiện hành của nhân viên
+    let updatedEmp: Employee = {
+      ...workHistoryTarget,
+      workHistory: autoSyncedHistory
+    };
+
+    if (workHistoryForm.isOngoing) {
+      updatedEmp = {
+        ...updatedEmp,
+        departmentId: newItem.departmentId,
+        positionId: newItem.positionId,
+        workStatus: newItem.workStatus,
+        salaryBasis: newItem.salaryBasis,
+        baseSalary: newItem.baseSalary,
+        salaryPercent: newItem.salaryPercent,
+        hourlyRate: newItem.hourlyRate,
+        transferLocation: newItem.transferLocation
+      };
+    }
+
+    setWorkHistoryTarget(updatedEmp);
+    if (onUpdateEmployee) {
+      onUpdateEmployee(updatedEmp);
+    }
+
+    setWorkHistorySuccessMsg(workHistoryForm.editingId ? 'Đã cập nhật giai đoạn thành công!' : 'Đã thêm mới giai đoạn công tác thành công!');
+    resetWorkHistoryForm();
+    setTimeout(() => setWorkHistorySuccessMsg(null), 3000);
+  };
+
+  const handleDeleteWorkHistoryItem = (itemId: string) => {
+    if (!workHistoryTarget) return;
+    if (!confirm('Bạn có chắc chắn muốn xóa giai đoạn công tác này?')) return;
+
+    const updatedHistory = (workHistoryTarget.workHistory || []).filter(h => h.id !== itemId);
+    const updatedEmp: Employee = {
+      ...workHistoryTarget,
+      workHistory: updatedHistory
+    };
+
+    setWorkHistoryTarget(updatedEmp);
+    if (onUpdateEmployee) {
+      onUpdateEmployee(updatedEmp);
+    }
+
+    setWorkHistorySuccessMsg('Đã xóa giai đoạn thành công!');
+    setTimeout(() => setWorkHistorySuccessMsg(null), 3000);
+  };
 
   const filteredEmployees = employees.filter(emp => {
     const matchSearch = 
@@ -451,6 +642,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                   <div>Lương Cơ Bản / HĐ</div>
                   <div className="text-[10px] font-normal text-slate-400 lowercase">hàng đơn vị (vd: 525.454)</div>
                 </th>
+                <th className="px-4 py-3 text-center min-w-[125px]">Quá Trình Làm Việc</th>
                 <th className="px-4 py-3">Số Tài Khoản NH</th>
                 <th className="px-4 py-3 text-right">Thao Tác</th>
               </tr>
@@ -458,7 +650,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-6 py-8 text-center text-slate-400">
+                  <td colSpan={12} className="px-6 py-8 text-center text-slate-400">
                     Không tìm thấy nhân viên nào phù hợp với bộ lọc tìm kiếm.
                   </td>
                 </tr>
@@ -635,6 +827,19 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                         </td>
                       )}
 
+                      {/* Cột Quá Trình Làm Việc / Lịch Sử Công Tác */}
+                      <td className="px-4 py-3.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenWorkHistory(emp)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors cursor-pointer"
+                          title="Xem và quản lý Quá trình làm việc / Lịch sử công tác qua các thời kỳ"
+                        >
+                          <History className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>{(emp.workHistory && emp.workHistory.length > 0) ? `${emp.workHistory.length} giai đoạn` : 'Thiết lập'}</span>
+                        </button>
+                      </td>
+
                       <td className="px-4 py-3.5 font-mono text-slate-600">
                         {emp.bankAccount ? (
                           <div>
@@ -711,6 +916,463 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           initialSelectedEmployeeIds={batchModalSelectedIds}
           initialDocType={batchModalInitialDocType}
         />
+      )}
+
+      {/* Modal Quá Trình Làm Việc / Lịch Sử Công Tác (Tương tự Quá trình đóng BHXH) */}
+      {workHistoryTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-100 rounded-xl text-emerald-700">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span>Quá Trình Làm Việc & Lịch Sử Công Tác</span>
+                    <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-mono font-bold">
+                      {workHistoryTarget.employeeCode}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Ghi nhận chức vụ, phòng ban, trạng thái công việc, hình thức tính lương và mức lương cơ bản qua các thời kỳ
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setWorkHistoryTarget(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Notification */}
+            {workHistorySuccessMsg && (
+              <div className="mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2 animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{workHistorySuccessMsg}</span>
+              </div>
+            )}
+
+            <div className="mt-5 space-y-6 text-xs">
+              {/* Card 1: Thông tin nhân viên hiện tại & Tự động đồng bộ */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full md:w-auto">
+                  <div>
+                    <span className="text-[11px] text-slate-500 block">Họ và tên</span>
+                    <strong className="text-slate-900 font-bold text-sm">{workHistoryTarget.fullName}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-slate-500 block">Số CCCD / MST</span>
+                    <span className="font-mono text-slate-800 font-semibold">{workHistoryTarget.idCardNumber || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-slate-500 block">Phòng ban & Chức vụ</span>
+                    <span className="text-slate-800 font-medium">
+                      {depMap.get(workHistoryTarget.departmentId)} - {posMap.get(workHistoryTarget.positionId)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-slate-500 block">Lương cơ bản hiện hành</span>
+                    <span className="font-mono text-emerald-700 font-bold">{formatVND(workHistoryTarget.baseSalary)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: Danh sách các giai đoạn quá trình làm việc */}
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
+                <div className="p-3 bg-slate-100/70 border-b border-slate-200 font-bold text-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-emerald-600" />
+                    <span>Các Giai Đoạn Công Tác & Diễn Biến Chức Vụ ({targetHistory.length})</span>
+                  </div>
+                  <span className="text-[11px] font-normal text-slate-500">
+                    Sắp xếp theo thứ tự thời gian từ trước đến nay
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="px-3 py-2 w-10 text-center">STT</th>
+                        <th className="px-3 py-2 min-w-[130px]">Thời Gian</th>
+                        <th className="px-3 py-2 min-w-[140px]">Phòng Ban & Chức Vụ</th>
+                        <th className="px-3 py-2 min-w-[110px]">Trạng Thái</th>
+                        <th className="px-3 py-2 min-w-[110px]">Hình Thức Lương</th>
+                        <th className="px-3 py-2 text-right min-w-[110px]">Lương Cơ Bản (VNĐ)</th>
+                        <th className="px-3 py-2 min-w-[120px]">Chi Nhánh / Ghi Chú</th>
+                        <th className="px-3 py-2 text-center min-w-[90px]">Tình Trạng</th>
+                        {canEditEmployees && <th className="px-3 py-2 text-right w-20">Thao Tác</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {targetHistory.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="p-6 text-center text-slate-400">
+                            Chưa có giai đoạn nào được ghi nhận. Hãy thêm giai đoạn mới ở form bên dưới.
+                          </td>
+                        </tr>
+                      ) : (
+                        targetHistory.map((item, idx) => {
+                          const isOngoing = !item.toMonth;
+                          const depName = depMap.get(item.departmentId) || item.departmentId;
+                          const posName = posMap.get(item.positionId) || item.positionId;
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="px-3 py-2.5 text-center text-slate-400 font-mono">{idx + 1}</td>
+                              <td className="px-3 py-2.5 font-mono font-bold text-slate-800">
+                                {item.fromMonth} → {item.toMonth || 'Đến nay'}
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <div className="font-semibold text-slate-900">{posName}</div>
+                                <div className="text-[11px] text-slate-500">{depName}</div>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <span className={`inline-block px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                                  item.workStatus === 'probation' ? 'bg-amber-100 text-amber-800' :
+                                  item.workStatus === 'transferred' ? 'bg-blue-100 text-blue-800' :
+                                  item.workStatus === 'maternity' ? 'bg-purple-100 text-purple-800' :
+                                  item.workStatus === 'resigned' ? 'bg-rose-100 text-rose-800' :
+                                  'bg-emerald-100 text-emerald-800'
+                                }`}>
+                                  {item.workStatus === 'probation' ? 'Thử việc' :
+                                   item.workStatus === 'transferred' ? 'Điều chuyển' :
+                                   item.workStatus === 'maternity' ? 'Nghỉ thai sản' :
+                                   item.workStatus === 'resigned' ? 'Đã nghỉ việc' : 'Chính thức'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-700">
+                                <div>
+                                  {item.salaryBasis === 'monthly' ? 'Lương tháng' :
+                                   item.salaryBasis === 'daily' ? 'Ngày công' :
+                                   item.salaryBasis === 'hourly' ? 'Theo giờ' :
+                                   item.salaryBasis === 'percent' ? `Theo KPI (${item.salaryPercent ?? 100}%)` : 'Theo bộ phận'}
+                                </div>
+                                {item.salaryBasis === 'hourly' && item.hourlyRate ? (
+                                  <div className="text-[10px] text-slate-400 font-mono">{formatVND(item.hourlyRate)}/h</div>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-900">
+                                {formatVND(item.baseSalary)}
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-600">
+                                {item.transferLocation && (
+                                  <div className="font-medium text-blue-700">Đến: {item.transferLocation}</div>
+                                )}
+                                <div className="text-[11px] text-slate-500 truncate max-w-[150px]" title={item.note}>
+                                  {item.note || '—'}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isOngoing ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {isOngoing ? 'Đang áp dụng' : 'Đã kết thúc'}
+                                </span>
+                              </td>
+                              {canEditEmployees && (
+                                <td className="px-3 py-2.5 text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEditWorkHistoryItem(item)}
+                                      className="p-1 text-blue-600 hover:bg-blue-50 rounded cursor-pointer"
+                                      title="Sửa giai đoạn này"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteWorkHistoryItem(item.id)}
+                                      className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer"
+                                      title="Xóa giai đoạn này"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Card 3: Form Thêm / Sửa giai đoạn */}
+              {canEditEmployees && (
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <h4 className="font-bold text-slate-900 mb-3 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      {workHistoryForm.editingId ? <Edit3 className="w-4 h-4 text-blue-600" /> : <Plus className="w-4 h-4 text-emerald-600" />}
+                      <span>{workHistoryForm.editingId ? 'Chỉnh Sửa Giai Đoạn Quá Trình Làm Việc' : 'Thêm Mới Giai Đoạn Quá Trình Làm Việc'}</span>
+                    </span>
+                    {workHistoryForm.editingId && (
+                      <button
+                        type="button"
+                        onClick={resetWorkHistoryForm}
+                        className="text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                      >
+                        Hủy chế độ sửa
+                      </button>
+                    )}
+                  </h4>
+
+                  <form onSubmit={handleSaveWorkHistoryItem} className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Từ Tháng (Bắt đầu) *
+                        </label>
+                        <input
+                          type="month"
+                          required
+                          value={workHistoryForm.fromMonth}
+                          onChange={e => setWorkHistoryForm({ ...workHistoryForm, fromMonth: e.target.value })}
+                          className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Đến Tháng (Kết thúc)
+                        </label>
+                        <input
+                          type="month"
+                          disabled={workHistoryForm.isOngoing}
+                          value={workHistoryForm.toMonth}
+                          onChange={e => setWorkHistoryForm({ ...workHistoryForm, toMonth: e.target.value })}
+                          className={`w-full px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none ${
+                            workHistoryForm.isOngoing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white'
+                          }`}
+                        />
+                        <label className="flex items-center gap-1.5 text-[11px] text-slate-700 mt-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={workHistoryForm.isOngoing}
+                            onChange={e => setWorkHistoryForm({ ...workHistoryForm, isOngoing: e.target.checked })}
+                            className="rounded text-emerald-600 cursor-pointer"
+                          />
+                          <span>Đang áp dụng đến nay</span>
+                        </label>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Phòng Ban *
+                        </label>
+                        <select
+                          value={workHistoryForm.departmentId}
+                          onChange={e => setWorkHistoryForm({ ...workHistoryForm, departmentId: e.target.value })}
+                          className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        >
+                          {departments.map(d => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Chức Vụ *
+                        </label>
+                        <select
+                          value={workHistoryForm.positionId}
+                          onChange={e => setWorkHistoryForm({ ...workHistoryForm, positionId: e.target.value })}
+                          className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        >
+                          {positions.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Trạng Thái Công Việc *
+                        </label>
+                        <select
+                          value={workHistoryForm.workStatus}
+                          onChange={e => setWorkHistoryForm({ ...workHistoryForm, workStatus: e.target.value as WorkStatus })}
+                          className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        >
+                          <option value="active">Chính thức (Đang làm việc)</option>
+                          <option value="probation">Thử việc</option>
+                          <option value="transferred">Điều chuyển công tác</option>
+                          <option value="maternity">Nghỉ thai sản</option>
+                          <option value="resigned">Đã nghỉ việc</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Hình Thức Lương *
+                        </label>
+                        <select
+                          value={workHistoryForm.salaryBasis}
+                          onChange={e => setWorkHistoryForm({ ...workHistoryForm, salaryBasis: e.target.value as SalaryCalculationBasis })}
+                          className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        >
+                          <option value="monthly">Lương tháng cố định</option>
+                          <option value="daily">Theo ngày công thực tế</option>
+                          <option value="hourly">Theo giờ (Hourly)</option>
+                          <option value="percent">Theo % KPI</option>
+                          <option value="department">Theo bộ phận</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Mức Lương Cơ Bản (VNĐ) *
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          step={1}
+                          min={0}
+                          value={workHistoryForm.baseSalary}
+                          onChange={e => setWorkHistoryForm({ ...workHistoryForm, baseSalary: Number(e.target.value) })}
+                          className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono font-bold text-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        />
+                        <span className="text-[10px] text-emerald-700 mt-0.5 block font-mono">
+                          {formatVND(workHistoryForm.baseSalary)} (đến hàng đơn vị)
+                        </span>
+                      </div>
+
+                      {workHistoryForm.workStatus === 'transferred' ? (
+                        <div>
+                          <label className="block text-[11px] font-semibold text-blue-700 mb-1">
+                            Đơn Vị / Chi Nhánh Đến
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ví dụ: Chi nhánh Đà Nẵng"
+                            value={workHistoryForm.transferLocation}
+                            onChange={e => setWorkHistoryForm({ ...workHistoryForm, transferLocation: e.target.value })}
+                            className="w-full px-3 py-1.5 border border-blue-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            % Lương Hưởng
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={workHistoryForm.salaryPercent}
+                            onChange={e => setWorkHistoryForm({ ...workHistoryForm, salaryPercent: Number(e.target.value) })}
+                            className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                          />
+                        </div>
+                      )}
+
+                      <div className="md:col-span-4">
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Lý Do / Quyết Định Bổ Nhiệm, Nâng Lương, Điều Chuyển
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ví dụ: Quyết định bổ nhiệm số 12/QĐ-TGĐ, hoàn thành thời gian thử việc..."
+                          value={workHistoryForm.note}
+                          onChange={e => setWorkHistoryForm({ ...workHistoryForm, note: e.target.value })}
+                          className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                      <span className="text-[11px] text-slate-500 italic">
+                        * Quá trình làm việc này sẽ tự động đồng bộ vào Bảng chấm công và Bảng lương của các tháng tương ứng.
+                      </span>
+
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Save className="w-4 h-4" />
+                        <span>{workHistoryForm.editingId ? 'Cập Nhật Giai Đoạn' : 'Lưu Giai Đoạn Mới'}</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Card 4: Trực quan hóa diễn biến quá trình làm việc */}
+              {targetHistory.length > 0 && (
+                <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                  <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-1.5">
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                    <span>Diễn Biến Quá Trình Công Tác & Chức Vụ Theo Dòng Thời Gian</span>
+                  </h4>
+                  <div className="flex items-center gap-2 overflow-x-auto pb-2">
+                    {targetHistory.map((h, i) => (
+                      <div
+                        key={h.id}
+                        className={`shrink-0 p-3 rounded-xl border text-xs min-w-[200px] ${
+                          !h.toMonth 
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-medium shadow-xs' 
+                            : 'bg-slate-50 border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                          <span>{h.fromMonth} → {!h.toMonth ? 'Nay' : h.toMonth}</span>
+                          <span className={`px-1.5 py-0.2 rounded font-bold text-[9px] ${
+                            h.workStatus === 'probation' ? 'bg-amber-100 text-amber-800' :
+                            h.workStatus === 'transferred' ? 'bg-blue-100 text-blue-800' :
+                            h.workStatus === 'maternity' ? 'bg-purple-100 text-purple-800' :
+                            h.workStatus === 'resigned' ? 'bg-rose-100 text-rose-800' :
+                            'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {h.workStatus === 'probation' ? 'Thử việc' :
+                             h.workStatus === 'transferred' ? 'Điều chuyển' :
+                             h.workStatus === 'maternity' ? 'Thai sản' :
+                             h.workStatus === 'resigned' ? 'Nghỉ việc' : 'Chính thức'}
+                          </span>
+                        </div>
+                        <div className="text-sm font-black text-slate-900 mt-1">
+                          {posMap.get(h.positionId) || h.positionId}
+                        </div>
+                        <div className="text-[11px] text-slate-600">
+                          {depMap.get(h.departmentId) || h.departmentId}
+                        </div>
+                        <div className="text-[11px] font-mono font-bold text-emerald-700 mt-1">
+                          {formatVND(h.baseSalary)}
+                        </div>
+                        <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                          {h.note || (h.transferLocation ? `Đến: ${h.transferLocation}` : 'Quá trình công tác')}
+                        </div>
+                        {!h.toMonth && (
+                          <span className="inline-block mt-1 text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded">
+                            Hiện hành
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end pt-4 mt-6 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setWorkHistoryTarget(null)}
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

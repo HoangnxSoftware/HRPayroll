@@ -199,6 +199,24 @@ export interface Employee {
   bankAccount?: string; // Số tài khoản ngân hàng
   bankName?: string; // Tên ngân hàng
   taxId?: string; // Mã số thuế cá nhân
+
+  // Quá trình làm việc / lịch sử công tác qua các thời kỳ (tương tự Quá trình đóng BHXH)
+  workHistory?: WorkHistoryItem[];
+}
+
+export interface WorkHistoryItem {
+  id: string;
+  fromMonth: string; // YYYY-MM hoặc YYYY-MM-DD (Bắt đầu)
+  toMonth?: string; // YYYY-MM hoặc YYYY-MM-DD (Để trống nếu đang áp dụng đến nay)
+  departmentId: string; // Phòng ban
+  positionId: string; // Chức vụ
+  workStatus: WorkStatus; // Trạng thái công việc: active | probation | transferred | maternity | resigned
+  salaryBasis: SalaryCalculationBasis; // Hình thức lương: monthly | daily | hourly | percent | department
+  baseSalary: number; // Mức lương cơ bản / thỏa thuận (VNĐ)
+  hourlyRate?: number;
+  salaryPercent?: number; // % Lương (ví dụ 85% thử việc, 100% chính thức)
+  transferLocation?: string; // Đơn vị / Chi nhánh điều chuyển đến (nếu có)
+  note?: string; // Căn cứ / Quyết định bổ nhiệm, điều chuyển, nâng lương...
 }
 
 
@@ -395,6 +413,9 @@ export interface PayrollRecord {
   hourlyRateApplied?: number; // Đơn giá lương/giờ áp dụng
   salaryBasis?: SalaryCalculationBasis; // Hình thức tính lương (tháng, ngày công, giờ, KPI...)
   baseSalary: number; // Lương cơ bản / hợp đồng
+  effectiveDepartmentId?: string; // Phòng ban theo quá trình làm việc tại tháng
+  effectivePositionId?: string; // Chức vụ theo quá trình làm việc tại tháng
+  effectiveWorkStatus?: WorkStatus; // Trạng thái làm việc tại tháng
 
   
   // 2. Thu nhập theo công và làm thêm

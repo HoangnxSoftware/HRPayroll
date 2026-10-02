@@ -175,7 +175,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       salaryPercent: Number(formData.salaryPercent) || 100,
       bankAccount: formData.bankAccount || '',
       bankName: formData.bankName || '',
-      taxId: formData.taxId || formData.idCardNumber || ''
+      taxId: formData.taxId || formData.idCardNumber || '',
+      workHistory: employeeToEdit?.workHistory || undefined
     };
 
     onSave(newEmp);

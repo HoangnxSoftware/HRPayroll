@@ -72,18 +72,18 @@ const SinglePayslipCard: React.FC<SinglePayslipCardProps> = ({
         </div>
         <div>
           <span className="text-slate-500">Phòng ban:</span>{' '}
-          <span className="font-semibold text-slate-800">{depMap.get(emp.departmentId) || '-'}</span>
+          <span className="font-semibold text-slate-800">{depMap.get(p.effectiveDepartmentId || emp.departmentId) || '-'}</span>
         </div>
         <div>
           <span className="text-slate-500">Chức vụ:</span>{' '}
-          <span className="font-semibold text-slate-800">{posMap.get(emp.positionId) || '-'}</span>
+          <span className="font-semibold text-slate-800">{posMap.get(p.effectivePositionId || emp.positionId) || '-'}</span>
         </div>
         <div>
           <span className="text-slate-500">Hình thức lương:</span>{' '}
           <span className="font-semibold text-slate-800">
-            {emp.salaryBasis === 'hourly' ? `Lương theo giờ (${formatVND(p.hourlyRateApplied || emp.hourlyRate || 0)}/h)` : (
-              emp.salaryBasis === 'daily' ? 'Theo ngày công' : (
-                emp.salaryBasis === 'percent' ? `Theo % KPI (${emp.salaryPercent || 100}%)` : 'Lương tháng cố định'
+            {(p.salaryBasis || emp.salaryBasis) === 'hourly' ? `Lương theo giờ (${formatVND(p.hourlyRateApplied || emp.hourlyRate || 0)}/h)` : (
+              (p.salaryBasis || emp.salaryBasis) === 'daily' ? 'Theo ngày công' : (
+                (p.salaryBasis || emp.salaryBasis) === 'percent' ? `Theo % KPI (${emp.salaryPercent || 100}%)` : 'Lương tháng cố định'
               )
             )}
           </span>

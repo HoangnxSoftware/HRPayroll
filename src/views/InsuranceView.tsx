@@ -879,7 +879,8 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                             {isEditing ? (
                               <input
                                 type="number"
-                                step={100000}
+                                step={1}
+                                min={0}
                                 value={editValues.insuranceSalary}
                                 onChange={e => setEditValues({ ...editValues, insuranceSalary: Number(e.target.value) })}
                                 className="w-28 px-2 py-1 border border-slate-300 rounded font-mono text-right text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
@@ -1726,7 +1727,7 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                         <input
                           type="number"
                           required
-                          step={100000}
+                          step={1}
                           min={0}
                           value={historyForm.salary}
                           onChange={e => setHistoryForm({ ...historyForm, salary: Number(e.target.value) })}

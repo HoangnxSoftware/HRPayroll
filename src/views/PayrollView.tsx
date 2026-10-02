@@ -423,18 +423,26 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
                         )}
                       </td>
                       <td className="px-3 py-3 font-bold text-slate-900">
-                        <div>{emp?.fullName}</div>
-                        <div className="text-[10px] text-slate-400 font-normal">{posMap.get(emp?.positionId || '')}</div>
+                        <div className="flex items-center gap-1.5">
+                          <span>{emp?.fullName}</span>
+                          {p.effectiveWorkStatus === 'probation' && (
+                            <span className="px-1 py-0.2 rounded bg-amber-100 text-amber-800 text-[9px] font-bold">Thử việc</span>
+                          )}
+                          {p.effectiveWorkStatus === 'transferred' && (
+                            <span className="px-1 py-0.2 rounded bg-blue-100 text-blue-800 text-[9px] font-bold">Điều chuyển</span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-normal">{posMap.get(p.effectivePositionId || emp?.positionId || '')}</div>
                       </td>
                       <td className="px-3 py-3 text-slate-600">
-                        {depMap.get(emp?.departmentId || '')}
+                        {depMap.get(p.effectiveDepartmentId || emp?.departmentId || '')}
                       </td>
                       <td className="px-3 py-3">
                         <span className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
-                          {emp?.salaryBasis === 'monthly' ? 'Lương tháng' :
-                           emp?.salaryBasis === 'daily' ? 'Ngày công' :
-                           emp?.salaryBasis === 'hourly' ? 'Theo giờ' :
-                           emp?.salaryBasis === 'percent' ? `${emp.salaryPercent || 100}% KPI` :
+                          {(p.salaryBasis || emp?.salaryBasis) === 'monthly' ? 'Lương tháng' :
+                           (p.salaryBasis || emp?.salaryBasis) === 'daily' ? 'Ngày công' :
+                           (p.salaryBasis || emp?.salaryBasis) === 'hourly' ? 'Theo giờ' :
+                           (p.salaryBasis || emp?.salaryBasis) === 'percent' ? `${emp?.salaryPercent || 100}% KPI` :
                            'Bộ phận'}
                         </span>
                       </td>

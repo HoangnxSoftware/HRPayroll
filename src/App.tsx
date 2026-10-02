@@ -602,6 +602,7 @@ function PayrollAppContent() {
               onDeleteEmployee={handleDeleteEmployee}
               onImportEmployees={handleImportEmployees}
               onUpdateEmployeeSalary={handleUpdateEmployeeSalary}
+              onUpdateEmployee={handleSaveEmployee}
               onUpdateSettings={setSettings}
             />
           )}
