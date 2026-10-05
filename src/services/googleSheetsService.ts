@@ -416,15 +416,15 @@ export const exportDataToGoogleSheets = async (
     ['Nhóm Thiết Lập', 'Chỉ Số / Nội Dung Cài Đặt', 'Giá Trị Áp Dụng', 'Căn Cứ / Ghi Chú'],
     
     // I. Thông tin pháp nhân & Cán bộ ký biểu
-    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Tên đơn vị / Doanh nghiệp', data.settings.companyName, 'Đơn vị chi trả thu nhập'],
-    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Mã số thuế (MST)', data.settings.taxCode, 'Mã định danh thuế'],
-    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Địa chỉ trụ sở', data.settings.address, ''],
-    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Số điện thoại liên hệ', data.settings.phoneNumber, ''],
-    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Năm làm việc', String(data.settings.currentYear), ''],
-    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Tháng làm việc', String(data.settings.currentMonth), ''],
-    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Giám đốc', data.settings.directorName, 'Ký duyệt bảng lương & chi trả'],
-    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Kế toán trưởng', data.settings.chiefAccountantName, 'Kiểm soát tài chính'],
-    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Người lập biểu', data.settings.reportPreparerName, 'Chuyên viên tiền lương'],
+    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Tên đơn vị / Doanh nghiệp', data.settings.companyName || '', 'Đơn vị chi trả thu nhập'],
+    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Mã số thuế (MST)', data.settings.taxCode || '', 'Mã định danh thuế'],
+    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Địa chỉ trụ sở', data.settings.address || '', 'Địa chỉ trụ sở chính'],
+    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Số điện thoại liên hệ', data.settings.phoneNumber || '', 'Hotline / Số điện thoại liên hệ'],
+    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Năm làm việc', String(data.settings.currentYear || 2026), 'Năm tính lương'],
+    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Tháng làm việc', String(data.settings.currentMonth || 9), 'Tháng tính lương'],
+    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Giám đốc', data.settings.directorName || '', 'Ký duyệt bảng lương & chi trả'],
+    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Kế toán trưởng', data.settings.chiefAccountantName || '', 'Kiểm soát tài chính'],
+    ['I. THÔNG TIN ĐƠN VỊ & CÁN BỘ PHỤ TRÁCH', 'Người lập biểu', data.settings.reportPreparerName || '', 'Chuyên viên tiền lương'],
 
     // II. Cơ sở tính lương & Thời gian làm việc
     ['II. CƠ SỞ TÍNH LƯƠNG & CHẾ ĐỘ THỜI GIAN', 'Chính sách ngày nghỉ cố định', data.settings.fixedDaysOffPolicy || 'sundays_and_half_saturdays', 'Chính sách nghỉ hàng tuần'],
@@ -1429,22 +1429,57 @@ export const importFullDataFromGoogleSheets = async (
     return [];
   };
 
-  // 1. Đọc sheet cài đặt hệ thống (HeThong_CaiDat)
+  // 1. Đọc sheet cài đặt hệ thống (HeThong_CaiDat hoặc CaiDat_HeThong)
   try {
-    const sRows = await fetchValues('HeThong_CaiDat!A1:D80');
-    if (sRows.length > 2) {
+    let sRows = await fetchValues('HeThong_CaiDat!A1:D80');
+    if (!sRows || sRows.length <= 1) {
+      sRows = await fetchValues('CaiDat_HeThong!A1:D80');
+    }
+
+    const cleanKey = (str: string): string => {
+      return (str || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[đĐ]/g, 'd')
+        .toLowerCase()
+        .replace(/[:\-–—_\/\\,\.]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+
+    // Lấy base settings từ localStorage nếu có để không bị reset các trường khi nhập
+    let baseSettings: SystemSettings = initialSettings;
+    try {
+      const saved = localStorage.getItem('payroll_system_settings');
+      if (saved) {
+        baseSettings = { ...initialSettings, ...JSON.parse(saved) };
+      }
+    } catch (e) {}
+
+    if (sRows && sRows.length > 1) {
       const settingsMap = new Map<string, string>();
       for (const row of sRows) {
-        // Hỗ trợ cả định dạng cũ 3 cột [Chỉ số, Giá trị, Ghi chú] và định dạng mới 4 cột [Nhóm, Chỉ số, Giá trị, Ghi chú]
-        if (row.length >= 4 && row[1] && row[2] !== undefined) {
-          settingsMap.set(String(row[1]).trim().toLowerCase(), String(row[2]).trim());
-        } else if (row.length >= 2 && row[0] && row[1] !== undefined) {
-          settingsMap.set(String(row[0]).trim().toLowerCase(), String(row[1]).trim());
+        if (!row || row.length < 2) continue;
+        const col0 = String(row[0] || '').trim();
+        const col1 = String(row[1] || '').trim();
+        const col2 = row[2] !== undefined ? String(row[2]).trim() : '';
+
+        // Bỏ qua dòng tiêu đề bảng hoặc header nhóm nếu không có giá trị
+        if (col0.startsWith('CẤU HÌNH') || col0.startsWith('Nhóm Thiết Lập') || col0.startsWith('CAU HINH')) continue;
+
+        // Nếu dòng có ít nhất 3 phần tử (định dạng 4 cột: [Nhóm, Chỉ số, Giá trị, Ghi chú] hoặc 3 cột [Nhóm, Chỉ số, Giá trị])
+        if (row.length >= 3 && col1) {
+          settingsMap.set(col1.toLowerCase(), col2);
+          settingsMap.set(cleanKey(col1), col2);
+        }
+        if (col0 && col1 !== undefined && !col0.startsWith('I.') && !col0.startsWith('II.') && !col0.startsWith('III.') && !col0.startsWith('IV.') && !col0.startsWith('V.') && !col0.startsWith('VI.')) {
+          settingsMap.set(col0.toLowerCase(), col1);
+          settingsMap.set(cleanKey(col0), col1);
         }
       }
 
       const parseNumber = (key: string, defaultVal: number): number => {
-        const raw = settingsMap.get(key.toLowerCase());
+        const raw = settingsMap.get(cleanKey(key)) ?? settingsMap.get(key.toLowerCase());
         if (!raw) return defaultVal;
         const cleaned = raw.replace(/[^\d.-]/g, '');
         const num = parseFloat(cleaned);
@@ -1452,65 +1487,82 @@ export const importFullDataFromGoogleSheets = async (
       };
 
       const parsePercent = (key: string, defaultVal: number): number => {
-        const raw = settingsMap.get(key.toLowerCase());
+        const raw = settingsMap.get(cleanKey(key)) ?? settingsMap.get(key.toLowerCase());
         if (!raw) return defaultVal;
         const cleaned = raw.replace(/[^\d.-]/g, '');
         const num = parseFloat(cleaned);
         return isNaN(num) ? defaultVal : num;
       };
 
+      const getStringVal = (keys: string[], defaultVal: string): string => {
+        for (const k of keys) {
+          const ck = cleanKey(k);
+          const direct = settingsMap.get(ck) ?? settingsMap.get(k.toLowerCase().trim());
+          if (direct !== undefined && direct !== '') return direct;
+        }
+        for (const k of keys) {
+          const ck = cleanKey(k);
+          for (const [mk, mv] of settingsMap.entries()) {
+            if (mk.includes(ck) && mv && mv !== '') {
+              return mv;
+            }
+          }
+        }
+        return defaultVal;
+      };
+
       const importedSettings: SystemSettings = {
-        ...initialSettings,
-        companyName: settingsMap.get('tên đơn vị / doanh nghiệp') || settingsMap.get('tên đơn vị') || initialSettings.companyName,
-        taxCode: settingsMap.get('mã số thuế (mst)') || settingsMap.get('mã số thuế') || initialSettings.taxCode,
-        address: settingsMap.get('địa chỉ trụ sở') || settingsMap.get('địa chỉ') || initialSettings.address,
-        phoneNumber: settingsMap.get('số điện thoại liên hệ') || settingsMap.get('số điện thoại') || initialSettings.phoneNumber,
-        directorName: settingsMap.get('giám đốc') || initialSettings.directorName,
-        chiefAccountantName: settingsMap.get('kế toán trưởng') || initialSettings.chiefAccountantName,
-        reportPreparerName: settingsMap.get('người lập biểu') || initialSettings.reportPreparerName,
-        currentYear: parseNumber('năm làm việc', initialSettings.currentYear),
-        currentMonth: parseNumber('tháng làm việc', initialSettings.currentMonth),
+        ...baseSettings,
+        companyName: getStringVal(['tên đơn vị / doanh nghiệp', 'tên đơn vị', 'tên công ty', 'doanh nghiệp', 'company', 'company name'], baseSettings.companyName),
+        taxCode: getStringVal(['mã số thuế (mst)', 'mã số thuế', 'mst', 'tax code', 'tax id'], baseSettings.taxCode),
+        address: getStringVal(['địa chỉ trụ sở', 'địa chỉ', 'trụ sở', 'địa chỉ công ty', 'tru so', 'address', 'dia chi'], baseSettings.address),
+        phoneNumber: getStringVal(['số điện thoại liên hệ', 'số điện thoại', 'điện thoại', 'hotline', 'sđt', 'phone', 'dien thoai', 'so dien thoai'], baseSettings.phoneNumber),
+        directorName: getStringVal(['giám đốc', 'director'], baseSettings.directorName),
+        chiefAccountantName: getStringVal(['kế toán trưởng', 'chief accountant'], baseSettings.chiefAccountantName),
+        reportPreparerName: getStringVal(['người lập biểu', 'preparer'], baseSettings.reportPreparerName),
+        currentYear: parseNumber('năm làm việc', baseSettings.currentYear),
+        currentMonth: parseNumber('tháng làm việc', baseSettings.currentMonth),
         
         // Cơ sở tính lương
-        standardWorkDays: parseNumber('số ngày công chuẩn trong tháng', initialSettings.standardWorkDays),
-        standardWorkHoursPerDay: parseNumber('giờ làm việc tiêu chuẩn / ngày', initialSettings.standardWorkHoursPerDay),
-        fixedDaysOffPolicy: (settingsMap.get('chính sách ngày nghỉ cố định') as FixedDaysOffPolicy) || initialSettings.fixedDaysOffPolicy,
-        defaultSalaryBasis: (settingsMap.get('hình thức tính lương mặc định') as SalaryCalculationBasis) || initialSettings.defaultSalaryBasis,
+        standardWorkDays: parseNumber('số ngày công chuẩn trong tháng', baseSettings.standardWorkDays),
+        standardWorkHoursPerDay: parseNumber('giờ làm việc tiêu chuẩn / ngày', baseSettings.standardWorkHoursPerDay),
+        fixedDaysOffPolicy: (settingsMap.get(cleanKey('chính sách ngày nghỉ cố định')) as FixedDaysOffPolicy) || baseSettings.fixedDaysOffPolicy,
+        defaultSalaryBasis: (settingsMap.get(cleanKey('hình thức tính lương mặc định')) as SalaryCalculationBasis) || baseSettings.defaultSalaryBasis,
 
         // Tỷ lệ OT
-        otWeekdayRate: parsePercent('tỷ lệ làm thêm ngày thường', initialSettings.otWeekdayRate * 100) / 100,
-        otWeekendRate: parsePercent('tỷ lệ làm thêm ngày nghỉ tuần (cn)', initialSettings.otWeekendRate * 100) / 100,
-        otHolidayRate: parsePercent('tỷ lệ làm thêm ngày lễ, tết, nghỉ có lương', initialSettings.otHolidayRate * 100) / 100,
-        otNightBonusRate: parsePercent('phụ cấp làm thêm ban đêm', initialSettings.otNightBonusRate * 100) / 100,
+        otWeekdayRate: parsePercent('tỷ lệ làm thêm ngày thường', baseSettings.otWeekdayRate * 100) / 100,
+        otWeekendRate: parsePercent('tỷ lệ làm thêm ngày nghỉ tuần (cn)', baseSettings.otWeekendRate * 100) / 100,
+        otHolidayRate: parsePercent('tỷ lệ làm thêm ngày lễ, tết, nghỉ có lương', baseSettings.otHolidayRate * 100) / 100,
+        otNightBonusRate: parsePercent('phụ cấp làm thêm ban đêm', baseSettings.otNightBonusRate * 100) / 100,
 
         // Tỷ lệ BHXH NLĐ
-        socialInsRateEmployee: parsePercent('tỷ lệ bhxh nlđ', initialSettings.socialInsRateEmployee),
-        healthInsRateEmployee: parsePercent('tỷ lệ bhyt nlđ', initialSettings.healthInsRateEmployee),
-        unemploymentInsRateEmployee: parsePercent('tỷ lệ bhtn nlđ', initialSettings.unemploymentInsRateEmployee),
+        socialInsRateEmployee: parsePercent('tỷ lệ bhxh nlđ', baseSettings.socialInsRateEmployee),
+        healthInsRateEmployee: parsePercent('tỷ lệ bhyt nlđ', baseSettings.healthInsRateEmployee),
+        unemploymentInsRateEmployee: parsePercent('tỷ lệ bhtn nlđ', baseSettings.unemploymentInsRateEmployee),
 
         // Tỷ lệ BHXH DN
-        socialInsRateEmployer: parsePercent('tỷ lệ bhxh doanh nghiệp (nsdlđ)', initialSettings.socialInsRateEmployer),
-        healthInsRateEmployer: parsePercent('tỷ lệ bhyt doanh nghiệp (nsdlđ)', initialSettings.healthInsRateEmployer),
-        unemploymentInsRateEmployer: parsePercent('tỷ lệ bhtn doanh nghiệp (nsdlđ)', initialSettings.unemploymentInsRateEmployer),
-        tradeUnionRateEmployer: parsePercent('kinh phí công đoàn doanh nghiệp (kpcđ)', initialSettings.tradeUnionRateEmployer),
+        socialInsRateEmployer: parsePercent('tỷ lệ bhxh doanh nghiệp (nsdlđ)', baseSettings.socialInsRateEmployer),
+        healthInsRateEmployer: parsePercent('tỷ lệ bhyt doanh nghiệp (nsdlđ)', baseSettings.healthInsRateEmployer),
+        unemploymentInsRateEmployer: parsePercent('tỷ lệ bhtn doanh nghiệp (nsdlđ)', baseSettings.unemploymentInsRateEmployer),
+        tradeUnionRateEmployer: parsePercent('kinh phí công đoàn doanh nghiệp (kpcđ)', baseSettings.tradeUnionRateEmployer),
 
         // Thuế & Giảm trừ
-        personalDeduction: parseNumber('giảm trừ gia cảnh bản thân (vnđ/tháng)', parseNumber('giảm trừ gia cảnh bản thân (vnđ)', initialSettings.personalDeduction)),
-        dependentDeduction: parseNumber('giảm trừ 1 người phụ thuộc (vnđ/tháng)', parseNumber('giảm trừ người phụ thuộc (vnđ/người)', initialSettings.dependentDeduction)),
-        standardMealPerDay: parseNumber('định mức ăn ca / ngày (vnđ/bữa)', parseNumber('định mức ăn ca / ngày (vnđ)', initialSettings.standardMealPerDay)),
-        monthlyMealFlatRate: parseNumber('mức tiền ăn trưa khoán tối đa miễn thuế (vnđ/tháng)', parseNumber('mức tiền ăn trưa khoán tối đa miễn thuế (vnđ)', initialSettings.monthlyMealFlatRate)),
+        personalDeduction: parseNumber('giảm trừ gia cảnh bản thân (vnđ/tháng)', parseNumber('giảm trừ gia cảnh bản thân (vnđ)', baseSettings.personalDeduction)),
+        dependentDeduction: parseNumber('giảm trừ 1 người phụ thuộc (vnđ/tháng)', parseNumber('giảm trừ người phụ thuộc (vnđ/người)', baseSettings.dependentDeduction)),
+        standardMealPerDay: parseNumber('định mức ăn ca / ngày (vnđ/bữa)', parseNumber('định mức ăn ca / ngày (vnđ)', baseSettings.standardMealPerDay)),
+        monthlyMealFlatRate: parseNumber('mức tiền ăn trưa khoán tối đa miễn thuế (vnđ/tháng)', parseNumber('mức tiền ăn trưa khoán tối đa miễn thuế (vnđ)', baseSettings.monthlyMealFlatRate)),
 
         // Tax exemption rules
         taxExemptionRules: {
-          ...(initialSettings.taxExemptionRules || DEFAULT_TAX_EXEMPTION_RULES),
-          otExemptMode: (settingsMap.get('quy định miễn thuế làm thêm giờ (ot)') as any) || 'differential_only',
+          ...(baseSettings.taxExemptionRules || DEFAULT_TAX_EXEMPTION_RULES),
+          otExemptMode: (settingsMap.get(cleanKey('quy định miễn thuế làm thêm giờ (ot)')) as any) || 'differential_only',
           otMonthlyHoursCap: parseNumber('trần giờ làm thêm / tháng miễn thuế (giờ)', 40),
           otYearlyHoursCap: parseNumber('trần giờ làm thêm / năm miễn thuế (giờ)', 200),
-          mealExemptMode: (settingsMap.get('quy định miễn thuế ăn ca tiền mặt') as any) || 'capped',
+          mealExemptMode: (settingsMap.get(cleanKey('quy định miễn thuế ăn ca tiền mặt')) as any) || 'capped',
           mealExemptMonthlyCap: parseNumber('trần miễn thuế ăn ca tiền mặt (vnđ/tháng)', 1200000),
-          uniformExemptMode: (settingsMap.get('quy định miễn thuế trang phục') as any) || 'capped',
+          uniformExemptMode: (settingsMap.get(cleanKey('quy định miễn thuế trang phục')) as any) || 'capped',
           uniformExemptMonthlyCap: parseNumber('trần miễn thuế trang phục (vnđ/tháng)', 416667),
-          legalNote: settingsMap.get('căn cứ pháp lý / ghi chú quy định') || initialSettings.taxExemptionRules?.legalNote
+          legalNote: settingsMap.get(cleanKey('căn cứ pháp lý / ghi chú quy định')) || baseSettings.taxExemptionRules?.legalNote
         }
       };
 

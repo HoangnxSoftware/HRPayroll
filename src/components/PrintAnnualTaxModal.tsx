@@ -1,7 +1,8 @@
 import React from 'react';
-import { Printer, X, Receipt, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Printer, X, Receipt, ShieldCheck, CheckCircle2, Download } from 'lucide-react';
 import { SystemSettings } from '../types';
 import { formatVND, CombinedAnnualTaxRecord } from '../utils/payrollCalculator';
+import * as XLSX from 'xlsx';
 
 interface PrintAnnualTaxModalProps {
   isOpen: boolean;
@@ -41,11 +42,132 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
     window.print();
   };
 
+  const handleExportExcel = () => {
+    const excelRows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      [`BẢNG TỔNG HỢP QUYẾT TOÁN THUẾ THU NHẬP CÁ NHÂN CẢ NĂM ${year}`],
+      ['(Chi tiết số thuế TNCN khấu trừ 12 tháng, thu nhập chịu thuế, thuế theo năm và chênh lệch quyết toán)'],
+      ['* Mã số thuế TNCN chính là số Căn cước công dân. Thu nhập của các lao động trùng số CCCD đã được tự động tính gộp.'],
+      [],
+      [
+        `Tổng người nộp thuế: ${annualRecords.length} người`,
+        `Tổng thuế đã trừ: ${formatVND(totalTaxWithheld)}`,
+        `Tổng TN chịu thuế: ${formatVND(totalTaxableIncome)}`,
+        `Tổng thuế cả năm: ${formatVND(totalAnnualPayable)}`,
+        `Chênh lệch quyết toán: ${totalDifference > 0 ? '+' : ''}${formatVND(totalDifference)}`
+      ],
+      [],
+      [
+        'STT',
+        'Số CCCD (MST)',
+        'Họ và Tên',
+        'Mã NV',
+        'T1',
+        'T2',
+        'T3',
+        'T4',
+        'T5',
+        'T6',
+        'T7',
+        'T8',
+        'T9',
+        'T10',
+        'T11',
+        'T12',
+        'Tổng Đã Trừ [1]',
+        'TN Chịu Thuế [2]',
+        'Tổng Giảm Trừ [3]',
+        'TNTT Năm [4]',
+        'Thuế Năm [5]',
+        'Chênh Lệch [6=1-5]'
+      ],
+      ...annualRecords.map((r, idx) => [
+        idx + 1,
+        r.idCardNumber,
+        r.fullName,
+        r.employeeCodes.join(', '),
+        r.monthlyTaxWithheld[1] || 0,
+        r.monthlyTaxWithheld[2] || 0,
+        r.monthlyTaxWithheld[3] || 0,
+        r.monthlyTaxWithheld[4] || 0,
+        r.monthlyTaxWithheld[5] || 0,
+        r.monthlyTaxWithheld[6] || 0,
+        r.monthlyTaxWithheld[7] || 0,
+        r.monthlyTaxWithheld[8] || 0,
+        r.monthlyTaxWithheld[9] || 0,
+        r.monthlyTaxWithheld[10] || 0,
+        r.monthlyTaxWithheld[11] || 0,
+        r.monthlyTaxWithheld[12] || 0,
+        r.totalTaxWithheldYear,
+        r.totalTaxableIncomeYear,
+        r.totalDeductionsYear,
+        r.totalAssessableIncomeYear,
+        r.annualPayableTax,
+        r.taxDifference
+      ]),
+      [
+        'TỔNG CỘNG TOÀN CÔNG TY',
+        '',
+        '',
+        '',
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[0],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[1],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[2],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[3],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[4],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[5],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[6],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[7],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[8],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[9],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[10],
+        Array.from({ length: 12 }, (_, i) => i + 1).map(m => annualRecords.reduce((s, r) => s + (r.monthlyTaxWithheld[m] || 0), 0))[11],
+        totalTaxWithheld,
+        totalTaxableIncome,
+        totalDeductions,
+        totalAssessable,
+        totalAnnualPayable,
+        totalDifference
+      ],
+      [],
+      [],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', '', '', '', 'GIÁM ĐỐC DOANH NGHIỆP'],
+      ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '', '', '', '', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
+      [],
+      [],
+      [
+        settings.reportPreparerName || 'Phạm Hồng Phúc',
+        '',
+        '',
+        settings.chiefAccountantName || 'Trần Thị Thu Hương',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        settings.directorName || 'Nguyễn Văn Thành'
+      ]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(excelRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Quyet_Toan_Thue_Nam');
+    XLSX.writeFile(wb, `Bang_Quyet_Toan_Thue_TNCN_Nam_${year}.xlsx`);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[96vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto print:p-0 print:bg-white">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[96vh] flex flex-col overflow-hidden print:border-none print:shadow-none print:max-h-none print:max-w-none">
         {/* Top Control Bar (Hidden when printing) */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 print:hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 print:hidden shrink-0">
           <div className="flex items-center gap-2">
             <Receipt className="w-5 h-5 text-indigo-700" />
             <div>
@@ -53,7 +175,7 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
                 In Báo Cáo Quyết Toán Thuế Thu Nhập Cá Nhân Cả Năm {year}
               </h3>
               <p className="text-[11px] text-slate-500">
-                Tổng hợp chi tiết 12 tháng • Tính gộp người lao động trùng CCCD khác mã NV • Chuẩn khổ in A3/A4 ngang
+                Tổng hợp chi tiết 12 tháng • Tính gộp người lao động trùng CCCD khác mã NV • Khổ A4 Ngang
               </p>
             </div>
           </div>
@@ -61,10 +183,17 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
           <div className="flex items-center gap-3">
             <button
               onClick={handlePrint}
-              className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
             >
               <Printer className="w-4 h-4 text-indigo-200" />
-              <span>In Báo Cáo Quyết Toán (Ctrl + P)</span>
+              <span>In Ngay / Lưu PDF</span>
+            </button>
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
             </button>
             <button
               onClick={onClose}
@@ -76,7 +205,56 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
         </div>
 
         {/* Printable Paper Area */}
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-white print:p-0 print:overflow-visible">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-white print:p-0">
+          <style dangerouslySetInnerHTML={{ __html: `
+            @media print {
+              @page {
+                size: A4 landscape;
+                margin: 6mm 4mm;
+              }
+              body {
+                visibility: hidden;
+                background: white !important;
+              }
+              #annual-tax-print-sheet, #annual-tax-print-sheet * {
+                visibility: visible;
+              }
+              #annual-tax-print-sheet {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100% !important;
+                max-width: 100% !important;
+                display: block !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: white !important;
+              }
+              table {
+                font-size: 6.8pt !important;
+                width: 100% !important;
+                border-collapse: collapse !important;
+              }
+              thead {
+                display: table-header-group !important;
+              }
+              tr {
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+              }
+              th, td {
+                padding: 2px 1px !important;
+                min-width: 0 !important;
+              }
+              .print\\:hidden {
+                display: none !important;
+              }
+            }
+          `}} />
+
+          <div id="annual-tax-print-sheet" className="max-w-[1400px] mx-auto print:max-w-none print:w-full text-slate-900 print:text-[8.5px]">
           {/* Company & Legal Header */}
           <div className="flex justify-between items-start text-xs border-b border-slate-300 pb-4 mb-4">
             <div>
@@ -304,6 +482,7 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
               <div className="h-14"></div>
               <div className="font-bold text-slate-900">{settings.directorName || 'Nguyễn Văn Thành'}</div>
             </div>
+          </div>
           </div>
         </div>
       </div>

@@ -1,7 +1,8 @@
 import React from 'react';
-import { Printer, X, UtensilsCrossed } from 'lucide-react';
+import { Printer, X, UtensilsCrossed, Download } from 'lucide-react';
 import { Employee, MealRegistration, TimekeepingRecord, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
+import { exportMealAttendanceToExcel } from '../utils/excelHelper';
 
 interface PrintMealModalProps {
   isOpen: boolean;
@@ -134,6 +135,13 @@ export const PrintMealModal: React.FC<PrintMealModalProps> = ({
               <span>In Ngay / Lưu PDF</span>
             </button>
             <button
+              onClick={() => exportMealAttendanceToExcel(timekeepings, employees, mealRegistrations, settings, settings.currentMonth, settings.currentYear)}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-sm font-semibold shadow-xs cursor-pointer transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
+            </button>
+            <button
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 cursor-pointer transition-colors"
             >
@@ -181,9 +189,6 @@ export const PrintMealModal: React.FC<PrintMealModalProps> = ({
               <div className="text-right">
                 <div className="text-xs font-semibold text-slate-800">
                   Kỳ theo dõi: Tháng {settings.currentMonth}/{settings.currentYear}
-                </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  Ngày in: {new Date().toLocaleDateString('vi-VN')}
                 </div>
                 <div className="text-[10px] text-emerald-800 font-bold mt-0.5">
                   Định mức miễn thuế: {mealExemptMode === 'fully_exempt' ? 'Miễn thuế toàn bộ' : mealExemptMode === 'fully_taxable' ? 'Chịu thuế toàn bộ' : `${formatVND(mealExemptLimit)}/tháng`}

@@ -301,8 +301,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     e.preventDefault();
     setErrorMessage(null);
 
-    // If an existing sheet was selected and hasn't been loaded yet
-    if (selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet && selectedFileId !== syncState.spreadsheetId) {
+    // If a Google sheet is selected, load latest data and system settings upon login
+    if (selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet) {
       try {
         await onLoadDataFromSpreadsheet(selectedFileId, selectedFileName || undefined);
       } catch (err) {
@@ -329,7 +329,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setPassword(pwd || '123');
     setErrorMessage(null);
 
-    if (selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet && selectedFileId !== syncState.spreadsheetId) {
+    if (selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet) {
       try {
         await onLoadDataFromSpreadsheet(selectedFileId, selectedFileName || undefined);
       } catch (err) {

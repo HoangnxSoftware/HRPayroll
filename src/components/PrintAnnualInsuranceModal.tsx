@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Printer, X, ShieldCheck } from 'lucide-react';
+import { Printer, X, ShieldCheck, Download } from 'lucide-react';
 import { Employee, InsuranceRecord, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
+import * as XLSX from 'xlsx';
 
 export interface AnnualEmployeeInsuranceData {
   employee: Employee;
@@ -92,19 +93,192 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
     monthlySalaryTotals[m] = annualData.reduce((sum, d) => sum + (d.monthlySalary?.[m] || 0), 0);
   }
 
-  const currentDateStr = new Date().toLocaleDateString('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  });
-
   const empTotalRate = Number(((settings.socialInsRateEmployee || 8) + (settings.healthInsRateEmployee || 1.5) + (settings.unemploymentInsRateEmployee || 1)).toFixed(2));
   const erTotalRate = Number(((settings.socialInsRateEmployer || 17.5) + (settings.healthInsRateEmployer || 3) + (settings.unemploymentInsRateEmployer || 1) + (settings.tradeUnionRateEmployer || 2)).toFixed(2));
   const totalAllRate = Number((empTotalRate + erTotalRate).toFixed(2));
 
+  const handleExportExcel = () => {
+    // Sheet 1: 12 Tháng trích nộp
+    const sheet1Rows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      [`BÁO CÁO TỔNG HỢP TRÍCH NỘP BẢO HIỂM XÃ HỘI CẢ NĂM ${year} (THEO 12 THÁNG)`],
+      [`Tỷ lệ chuẩn: NLĐ ${empTotalRate}% • Doanh nghiệp ${erTotalRate}% (Tổng ${totalAllRate}%)`],
+      [],
+      [
+        'STT',
+        'Mã NV',
+        'Số CCCD',
+        'Họ và Tên',
+        'Phòng Ban',
+        'T1',
+        'T2',
+        'T3',
+        'T4',
+        'T5',
+        'T6',
+        'T7',
+        'T8',
+        'T9',
+        'T10',
+        'T11',
+        'T12',
+        'Tổng Quỹ Lương Năm',
+        'Tổng NLĐ Đóng',
+        'Tổng DN Đóng',
+        'Tổng Nộp Cả Năm',
+        'Bình Quân / Tháng'
+      ],
+      ...annualData.map((row, idx) => [
+        idx + 1,
+        row.employee.employeeCode,
+        row.employee.idCardNumber || '',
+        row.employee.fullName,
+        row.departmentName,
+        row.monthlyGrandTotal[1] || 0,
+        row.monthlyGrandTotal[2] || 0,
+        row.monthlyGrandTotal[3] || 0,
+        row.monthlyGrandTotal[4] || 0,
+        row.monthlyGrandTotal[5] || 0,
+        row.monthlyGrandTotal[6] || 0,
+        row.monthlyGrandTotal[7] || 0,
+        row.monthlyGrandTotal[8] || 0,
+        row.monthlyGrandTotal[9] || 0,
+        row.monthlyGrandTotal[10] || 0,
+        row.monthlyGrandTotal[11] || 0,
+        row.monthlyGrandTotal[12] || 0,
+        row.totalInsuranceSalaryYear,
+        row.totalEmpYear,
+        row.totalErYear,
+        row.totalContributionYear,
+        Math.round(row.avgMonthlyContribution)
+      ]),
+      [
+        'TỔNG CỘNG TOÀN CÔNG TY',
+        '',
+        '',
+        '',
+        '',
+        monthlyTotals[1] || 0,
+        monthlyTotals[2] || 0,
+        monthlyTotals[3] || 0,
+        monthlyTotals[4] || 0,
+        monthlyTotals[5] || 0,
+        monthlyTotals[6] || 0,
+        monthlyTotals[7] || 0,
+        monthlyTotals[8] || 0,
+        monthlyTotals[9] || 0,
+        monthlyTotals[10] || 0,
+        monthlyTotals[11] || 0,
+        monthlyTotals[12] || 0,
+        grandSalaryAll,
+        grandEmpTotalAll,
+        grandErTotalAll,
+        grandTotalAll,
+        Math.round(grandTotalAll / 12)
+      ],
+      [],
+      [],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', '', '', '', 'GIÁM ĐỐC DOANH NGHIỆP'],
+      ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '', '', '', '', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
+      [],
+      [],
+      [
+        settings.reportPreparerName || 'Phạm Hồng Phúc',
+        '',
+        '',
+        settings.chiefAccountantName || 'Trần Thị Thu Hương',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        settings.directorName || 'Nguyễn Văn Thành'
+      ]
+    ];
+
+    // Sheet 2: Chi tiết các quỹ
+    const sheet2Rows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      [`BÁO CÁO CHI TIẾT CÁC QUỸ BẢO HIỂM XÃ HỘI CẢ NĂM ${year}`],
+      [],
+      [
+        'STT',
+        'Mã NV',
+        'Số CCCD',
+        'Họ và Tên',
+        'Phòng Ban',
+        'Tổng Quỹ Lương Năm',
+        `BHXH NLĐ (${settings.socialInsRateEmployee || 8}%)`,
+        `BHYT NLĐ (${settings.healthInsRateEmployee || 1.5}%)`,
+        `BHTN NLĐ (${settings.unemploymentInsRateEmployee || 1}%)`,
+        'Tổng NLĐ Trích Nộp',
+        `BHXH DN (${settings.socialInsRateEmployer || 17.5}%)`,
+        `BHYT DN (${settings.healthInsRateEmployer || 3}%)`,
+        `BHTN DN (${settings.unemploymentInsRateEmployer || 1}%)`,
+        `KPCĐ DN (${settings.tradeUnionRateEmployer || 2}%)`,
+        'Tổng DN Đóng',
+        'TỔNG CỘNG NỘP CƠ QUAN BHXH'
+      ],
+      ...annualData.map((row, idx) => [
+        idx + 1,
+        row.employee.employeeCode,
+        row.employee.idCardNumber || '',
+        row.employee.fullName,
+        row.departmentName,
+        row.totalInsuranceSalaryYear,
+        row.totalSocEmpYear,
+        row.totalMedEmpYear,
+        row.totalUnempEmpYear,
+        row.totalEmpYear,
+        row.totalSocErYear,
+        row.totalMedErYear,
+        row.totalUnempErYear,
+        row.totalUnionErYear,
+        row.totalErYear,
+        row.totalContributionYear
+      ]),
+      [
+        'TỔNG CỘNG TOÀN CÔNG TY',
+        '',
+        '',
+        '',
+        '',
+        grandSalaryAll,
+        grandEmpSocAll,
+        grandEmpMedAll,
+        grandEmpUnempAll,
+        grandEmpTotalAll,
+        grandErSocAll,
+        grandErMedAll,
+        grandErUnempAll,
+        grandErUnionAll,
+        grandErTotalAll,
+        grandTotalAll
+      ]
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
+    const ws2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
+    XLSX.utils.book_append_sheet(wb, ws1, `BHXH_12_Thang_${year}`);
+    XLSX.utils.book_append_sheet(wb, ws2, `Chi_Tiet_Cac_Quy_${year}`);
+    XLSX.writeFile(wb, `Bao_Cao_Trich_Nop_BHXH_Ca_Nam_${year}.xlsx`);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print:p-0 print:bg-white print:static">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[96vh] flex flex-col print:shadow-none print:border-none print:max-h-none print:max-w-none print:w-full print:rounded-none">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print:p-0 print:bg-white">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[96vh] flex flex-col overflow-hidden print:border-none print:shadow-none print:max-h-none print:max-w-none">
         {/* Header Modal Bar (Hidden on print) */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200 bg-slate-50 rounded-t-2xl print:hidden shrink-0">
           <div className="flex items-center gap-2.5">
@@ -152,6 +326,13 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
               <span>In Ngay / Lưu PDF</span>
             </button>
             <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-800 hover:bg-purple-900 text-white font-semibold text-sm rounded-xl shadow-md shadow-purple-900/20 transition-all cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
+            </button>
+            <button
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
             >
@@ -161,15 +342,16 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
         </div>
 
         {/* Printable Paper Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100 print:bg-white print:p-0 print:overflow-visible">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100 print:bg-white print:p-0">
           <style dangerouslySetInnerHTML={{ __html: `
             @media print {
               @page {
                 size: A4 landscape;
                 margin: 6mm 4mm;
               }
-              body * {
+              body {
                 visibility: hidden;
+                background: white !important;
               }
               #annual-insurance-print-sheet, #annual-insurance-print-sheet * {
                 visibility: visible;
@@ -178,13 +360,38 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
                 position: absolute;
                 left: 0;
                 top: 0;
-                width: 100%;
+                width: 100% !important;
+                max-width: 100% !important;
                 display: block !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: white !important;
+              }
+              table {
+                font-size: 6.8pt !important;
+                width: 100% !important;
+                border-collapse: collapse !important;
+              }
+              thead {
+                display: table-header-group !important;
+              }
+              tr {
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+              }
+              th, td {
+                padding: 2px 1px !important;
+                min-width: 0 !important;
+              }
+              .print\\:hidden {
+                display: none !important;
               }
             }
           `}} />
 
-          <div id="annual-insurance-print-sheet" className="bg-white mx-auto p-6 rounded-xl shadow-xs print:shadow-none print:p-1 max-w-[1550px] border border-slate-200 print:border-none text-slate-900 text-[10px]">
+          <div id="annual-insurance-print-sheet" className="bg-white mx-auto p-6 rounded-xl shadow-xs print:shadow-none print:p-0 max-w-[1550px] print:max-w-none print:w-full border border-slate-200 print:border-none text-slate-900 text-[10px] print:text-[8.5px]">
             {/* Enterprise Header */}
             <div className="flex justify-between items-start border-b border-slate-300 pb-3 mb-3">
               <div>
@@ -199,7 +406,6 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
               </div>
               <div className="text-right">
                 <div className="text-xs font-semibold text-slate-800">Báo cáo: Cả năm {year}</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">Ngày in: {currentDateStr}</div>
                 <div className="text-[10px] text-purple-800 font-bold mt-0.5">
                   Tỷ lệ chuẩn: NLĐ {empTotalRate}% • Doanh nghiệp {erTotalRate}% (Tổng {totalAllRate}%)
                 </div>
@@ -261,18 +467,18 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
                       </th>
                     </tr>
                     <tr className="bg-slate-50 font-semibold text-slate-700 text-[10px]">
-                      <th className="border border-slate-400 p-0.5 w-14">T1</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T2</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T3</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T4</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T5</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T6</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T7</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T8</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T9</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T10</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T11</th>
-                      <th className="border border-slate-400 p-0.5 w-14">T12</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T1</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T2</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T3</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T4</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T5</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T6</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T7</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T8</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T9</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T10</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T11</th>
+                      <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T12</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -491,18 +697,21 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
             <div className="grid grid-cols-3 gap-6 text-center mt-6 pt-4 text-xs font-semibold print:text-[9px]">
               <div>
                 <p className="uppercase text-slate-800 font-bold">Người Lập Biểu</p>
-                <p className="text-[10px] text-slate-500 italic mb-12">(Ký, ghi rõ họ tên)</p>
-                <p className="text-slate-700 font-medium">Chuyên viên Nhân sự / BHXH</p>
+                <p className="text-[10px] text-slate-500 italic mb-10">(Ký, ghi rõ họ tên)</p>
+                <p className="text-slate-900 font-bold text-xs">{settings.reportPreparerName || 'Phạm Hồng Phúc'}</p>
+                <p className="text-slate-500 font-medium text-[10px]">Chuyên viên Nhân sự / BHXH</p>
               </div>
               <div>
                 <p className="uppercase text-slate-800 font-bold">Kế Toán Trưởng</p>
-                <p className="text-[10px] text-slate-500 italic mb-12">(Ký, ghi rõ họ tên)</p>
-                <p className="text-slate-700 font-medium">Kế toán trưởng</p>
+                <p className="text-[10px] text-slate-500 italic mb-10">(Ký, ghi rõ họ tên)</p>
+                <p className="text-slate-900 font-bold text-xs">{settings.chiefAccountantName || 'Trần Thị Thu Hương'}</p>
+                <p className="text-slate-500 font-medium text-[10px]">Kế toán trưởng</p>
               </div>
               <div>
                 <p className="uppercase text-slate-800 font-bold">Giám Đốc Doanh Nghiệp</p>
-                <p className="text-[10px] text-slate-500 italic mb-12">(Ký, đóng dấu, ghi rõ họ tên)</p>
-                <p className="text-slate-700 font-medium">Đại diện theo pháp luật</p>
+                <p className="text-[10px] text-slate-500 italic mb-10">(Ký, đóng dấu, ghi rõ họ tên)</p>
+                <p className="text-slate-900 font-bold text-xs">{settings.directorName || 'Nguyễn Văn Thành'}</p>
+                <p className="text-slate-500 font-medium text-[10px]">Đại diện theo pháp luật</p>
               </div>
             </div>
           </div>

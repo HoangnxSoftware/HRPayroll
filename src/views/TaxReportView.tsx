@@ -49,6 +49,7 @@ import { exportTaxReportToExcel, exportAnnualTaxReportToExcel } from '../utils/e
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintTaxReportModal } from '../components/PrintTaxReportModal';
 import { PrintAnnualTaxModal } from '../components/PrintAnnualTaxModal';
+import { PrintTaxBreakdownModal } from '../components/PrintTaxBreakdownModal';
 import { EditTaxBracketsModal } from '../components/EditTaxBracketsModal';
 import { EditTaxExemptionModal } from '../components/EditTaxExemptionModal';
 
@@ -90,6 +91,7 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
   // Modals state
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [isPrintAnnualModalOpen, setIsPrintAnnualModalOpen] = useState(false);
+  const [isBreakdownPrintOpen, setIsBreakdownPrintOpen] = useState(false);
   const [isEditBracketsOpen, setIsEditBracketsOpen] = useState(false);
   const [isEditExemptionOpen, setIsEditExemptionOpen] = useState(false);
 
@@ -1188,15 +1190,26 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                 <p className="text-xs text-slate-500">Phân định từng thành phần theo quy định của Luật Thuế TNCN và Bộ luật Lao động</p>
               </div>
             </div>
-            {canEditSettings && (
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setIsEditExemptionOpen(true)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
+                type="button"
+                onClick={() => setIsBreakdownPrintOpen(true)}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
+                title="In Báo cáo bóc tách thu nhập chịu thuế và miễn thuế theo tháng (khổ A4 hoặc kết xuất Excel)"
               >
-                <ShieldCheck className="w-4 h-4" />
-                <span>Chỉnh Sửa Quy Tắc Miễn Thuế</span>
+                <Printer className="w-4 h-4" />
+                <span>In Báo Cáo Bóc Tách (Tháng {settings.currentMonth})</span>
               </button>
-            )}
+              {canEditSettings && (
+                <button
+                  onClick={() => setIsEditExemptionOpen(true)}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Chỉnh Sửa Quy Tắc Miễn Thuế</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -1437,7 +1450,17 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
         employees={employees}
         payrolls={payrolls}
         settings={settings}
-        month={`${settings.currentMonth}/${settings.currentYear}`}
+        month={String(settings.currentMonth)}
+      />
+
+      {/* Modal In Báo Cáo Bóc Tách Thu Nhập Chịu Thuế & Miễn Thuế */}
+      <PrintTaxBreakdownModal
+        isOpen={isBreakdownPrintOpen}
+        onClose={() => setIsBreakdownPrintOpen(false)}
+        employees={employees}
+        payrolls={filteredPayrolls}
+        settings={settings}
+        month={String(settings.currentMonth)}
       />
 
       {/* Modal In Báo Cáo Quyết Toán Thuế TNCN Cả Năm */}

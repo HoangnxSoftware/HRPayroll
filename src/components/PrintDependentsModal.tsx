@@ -1,7 +1,8 @@
 import React from 'react';
-import { Printer, X, HeartHandshake } from 'lucide-react';
+import { Printer, X, HeartHandshake, Download } from 'lucide-react';
 import { Dependent, Employee, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
+import * as XLSX from 'xlsx';
 
 interface PrintDependentsModalProps {
   isOpen: boolean;
@@ -22,6 +23,112 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
 
   const empMap = new Map(employees.map(e => [e.id, e]));
   const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
+
+  const calculateAge = (birthDateStr?: string) => {
+    if (!birthDateStr) return '—';
+    const b = new Date(birthDateStr);
+    if (isNaN(b.getTime())) return '—';
+    const today = new Date();
+    let age = today.getFullYear() - b.getFullYear();
+    const m = today.getMonth() - b.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < b.getDate())) {
+      age--;
+    }
+    return age >= 0 ? `${age} tuổi` : '—';
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const totalDeduction = dependents.reduce((sum, d) => sum + (d.deductionAmount || 4400000), 0);
+
+  const handleExportExcel = () => {
+    const excelRows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      ['BẢNG TỔNG HỢP ĐĂNG KÝ NGƯỜI PHỤ THUỘC GIẢM TRỪ GIA CẢNH'],
+      [`Tổng số: ${dependents.length} người phụ thuộc • Mức giảm trừ chuẩn: ${formatVND(settings.dependentDeduction || 4400000)}/tháng`],
+      [],
+      [
+        'STT',
+        'Mã NV',
+        'Số CCCD NLĐ',
+        'Họ và Tên Nhân Viên',
+        'Phòng Ban',
+        'Họ Tên Người Phụ Thuộc',
+        'Mối Quan Hệ',
+        'Ngày Sinh',
+        'Tuổi',
+        'Số CCCD / MST / Định Danh NPT',
+        'Bắt Đầu',
+        'Kết Thúc',
+        'Mức Giảm Trừ (VNĐ)',
+        'Ghi Chú'
+      ],
+      ...dependents.map((dep, idx) => {
+        const emp = empMap.get(dep.employeeId);
+        return [
+          idx + 1,
+          emp?.employeeCode || '-',
+          emp?.idCardNumber || '-',
+          emp?.fullName || '-',
+          depMap.get(emp?.departmentId || '') || '',
+          dep.fullName,
+          dep.relationship,
+          dep.birthDate || '-',
+          calculateAge(dep.birthDate),
+          dep.taxCodeOrId || '-',
+          dep.startDate || '-',
+          dep.endDate || 'Hiện tại',
+          dep.deductionAmount || 4400000,
+          dep.note || ''
+        ];
+      }),
+      [
+        'TỔNG CỘNG',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        totalDeduction,
+        ''
+      ],
+      [],
+      [],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', 'GIÁM ĐỐC DOANH NGHIỆP'],
+      ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
+      [],
+      [],
+      [
+        settings.reportPreparerName || 'Phạm Hồng Phúc',
+        '',
+        '',
+        settings.chiefAccountantName || 'Trần Thị Thu Hương',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        settings.directorName || 'Nguyễn Văn Thành'
+      ]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(excelRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Nguoi_Phu_Thuoc');
+    XLSX.writeFile(wb, `Bang_Tong_Hop_Nguoi_Phu_Thuoc_${settings.companyName.replace(/\s+/g, '_').slice(0, 15)}.xlsx`);
+  };
 
   // Tập hợp các số CCCD NLĐ bị trùng lặp giữa các nhân viên khác nhau
   const duplicateEmpIdCards = React.useMemo(() => {
@@ -51,12 +158,6 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
     return dupSet;
   }, [dependents]);
 
-  const totalDeduction = dependents.reduce((sum, d) => sum + (d.deductionAmount || 4400000), 0);
-
-  const handlePrint = () => {
-    window.print();
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[96vh] flex flex-col overflow-hidden">
@@ -80,6 +181,13 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
               <span>In Ngay / Lưu PDF</span>
             </button>
             <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-sm font-semibold shadow-xs cursor-pointer transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
+            </button>
+            <button
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 cursor-pointer transition-colors"
             >
@@ -93,20 +201,21 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
           <style dangerouslySetInnerHTML={{ __html: `
             @media print {
               @page {
-                size: landscape;
+                size: A4 landscape;
                 margin: 7mm 5mm;
               }
-              body {
-                visibility: hidden;
+              body * {
+                visibility: hidden !important;
               }
               #dependents-print-sheet, #dependents-print-sheet * {
-                visibility: visible;
+                visibility: visible !important;
               }
               #dependents-print-sheet {
                 position: absolute;
                 left: 0;
                 top: 0;
                 width: 100%;
+                display: block !important;
               }
             }
           `}} />
@@ -127,9 +236,6 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
               <div className="text-right">
                 <div className="text-xs font-semibold text-slate-800">
                   Hồ sơ giảm trừ gia cảnh thuế TNCN
-                </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  Ngày in: {new Date().toLocaleDateString('vi-VN')}
                 </div>
                 <div className="text-[10px] text-emerald-800 font-bold mt-0.5">
                   Mức giảm trừ: {formatVND(settings.dependentDeduction || 4400000)} / người / tháng
@@ -176,6 +282,7 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
                     <th className="border border-slate-400 p-1 text-left min-w-[130px]">Họ Tên Người Phụ Thuộc</th>
                     <th className="border border-slate-400 p-1 min-w-[90px]">Quan Hệ</th>
                     <th className="border border-slate-400 p-1 w-20">Ngày Sinh</th>
+                    <th className="border border-slate-400 p-1 w-14 text-center">Tuổi</th>
                     <th className="border border-slate-400 p-1 min-w-[110px]">Số CCCD / MST / Định Danh</th>
                     <th className="border border-slate-400 p-1 w-24">Bắt Đầu</th>
                     <th className="border border-slate-400 p-1 w-24">Kết Thúc</th>
@@ -206,6 +313,7 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
                         <td className="border border-slate-400 p-1 text-left font-semibold text-slate-800">{dep.fullName}</td>
                         <td className="border border-slate-400 p-1">{dep.relationship}</td>
                         <td className="border border-slate-400 p-1 font-mono">{dep.birthDate || '-'}</td>
+                        <td className="border border-slate-400 p-1 font-mono font-bold text-slate-700">{calculateAge(dep.birthDate)}</td>
                         <td className="border border-slate-400 p-1 font-mono">
                           <div>{dep.taxCodeOrId || '-'}</div>
                           {isDuplicateDepCccd && (
@@ -226,7 +334,7 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
 
                   {/* Summary Row */}
                   <tr className="bg-slate-200 font-bold text-slate-900">
-                    <td colSpan={11} className="border border-slate-400 p-1 text-center uppercase">
+                    <td colSpan={12} className="border border-slate-400 p-1 text-center uppercase">
                       TỔNG CỘNG MỨC GIẢM TRỪ GIA CẢNH ({dependents.length} Người)
                     </td>
                     <td className="border border-slate-400 p-1 text-right font-mono font-black text-emerald-900">
@@ -243,17 +351,23 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
               <div>
                 <div className="font-bold uppercase text-slate-900">NGƯỜI LẬP BIỂU</div>
                 <div className="text-[10px] text-slate-500 italic mt-0.5">(Ký, ghi rõ họ tên)</div>
-                <div className="h-16"></div>
+                <div className="h-14 flex items-end justify-center font-bold text-slate-800">
+                  {settings.reportPreparerName || 'Phạm Hồng Phúc'}
+                </div>
               </div>
               <div>
                 <div className="font-bold uppercase text-slate-900">KẾ TOÁN TRƯỞNG</div>
                 <div className="text-[10px] text-slate-500 italic mt-0.5">(Ký, ghi rõ họ tên)</div>
-                <div className="h-16"></div>
+                <div className="h-14 flex items-end justify-center font-bold text-slate-800">
+                  {settings.chiefAccountantName || 'Trần Thị Thu Hương'}
+                </div>
               </div>
               <div>
                 <div className="font-bold uppercase text-slate-900">GIÁM ĐỐC DOANH NGHIỆP</div>
                 <div className="text-[10px] text-slate-500 italic mt-0.5">(Ký, đóng dấu, ghi rõ họ tên)</div>
-                <div className="h-16"></div>
+                <div className="h-14 flex items-end justify-center font-bold text-slate-800">
+                  {settings.directorName || 'Nguyễn Văn Thành'}
+                </div>
               </div>
             </div>
           </div>

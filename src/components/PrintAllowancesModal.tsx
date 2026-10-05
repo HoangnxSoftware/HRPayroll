@@ -1,7 +1,8 @@
 import React from 'react';
-import { Printer, X, Award } from 'lucide-react';
+import { Printer, X, Award, Download } from 'lucide-react';
 import { Employee, SpecialAllowance, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
+import * as XLSX from 'xlsx';
 
 interface PrintAllowancesModalProps {
   isOpen: boolean;
@@ -32,6 +33,78 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
     window.print();
   };
 
+  const handleExportExcel = () => {
+    const excelRows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      [`BẢNG TỔNG HỢP CÁC KHOẢN PHỤ CẤP ĐẶC THÙ & HỖ TRỢ`],
+      [`Tháng ${settings.currentMonth} năm ${settings.currentYear}`],
+      [],
+      [
+        'STT',
+        'Mã NV',
+        'Số CCCD',
+        'Họ và Tên',
+        'Phòng Ban',
+        'Chức Vụ',
+        'Tên Khoản Phụ Cấp',
+        'Tính Chất Thuế',
+        'Số Tiền (VNĐ)',
+        'Ghi Chú / Quyết Định'
+      ],
+      ...specialAllowances.map((a, idx) => {
+        const emp = empMap.get(a.employeeId);
+        return [
+          idx + 1,
+          emp?.employeeCode || '',
+          emp?.idCardNumber || '',
+          emp?.fullName || '',
+          depMap.get(emp?.departmentId || '') || '',
+          posMap.get(emp?.positionId || '') || '',
+          a.name,
+          a.isTaxable ? 'Chịu thuế TNCN' : 'Miễn thuế',
+          a.amount,
+          a.note || ''
+        ];
+      }),
+      [
+        'TỔNG CỘNG',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        `Chịu thuế: ${formatVND(taxableAmount)} | Miễn thuế: ${formatVND(exemptAmount)}`,
+        totalAmount,
+        ''
+      ],
+      [],
+      [],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', 'GIÁM ĐỐC DOANH NGHIỆP'],
+      ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
+      [],
+      [],
+      [
+        settings.reportPreparerName || 'Phạm Hồng Phúc',
+        '',
+        '',
+        settings.chiefAccountantName || 'Trần Thị Thu Hương',
+        '',
+        '',
+        '',
+        settings.directorName || 'Nguyễn Văn Thành'
+      ]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(excelRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Phu_Cap');
+    XLSX.writeFile(wb, `Danh_Sach_Phu_Cap_T${settings.currentMonth}_${settings.currentYear}.xlsx`);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[96vh] flex flex-col overflow-hidden">
@@ -53,6 +126,13 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
             >
               <Printer className="w-4 h-4" />
               <span>In Ngay / Lưu PDF</span>
+            </button>
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-sm font-semibold shadow-xs cursor-pointer transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
             </button>
             <button
               onClick={onClose}
@@ -102,9 +182,6 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
               <div className="text-right">
                 <div className="text-xs font-semibold text-slate-800">
                   Kỳ chi trả: Tháng {settings.currentMonth}/{settings.currentYear}
-                </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  Ngày in: {new Date().toLocaleDateString('vi-VN')}
                 </div>
                 <div className="text-[10px] text-emerald-800 font-bold mt-0.5">
                   Tổng số mục phụ cấp: {specialAllowances.length}

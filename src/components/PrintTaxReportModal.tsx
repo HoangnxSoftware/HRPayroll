@@ -1,7 +1,8 @@
 import React from 'react';
-import { Printer, X, Receipt, ShieldCheck, CheckCircle2, Info } from 'lucide-react';
+import { Printer, X, Receipt, ShieldCheck, CheckCircle2, Info, Download } from 'lucide-react';
 import { Employee, PayrollRecord, SystemSettings } from '../types';
 import { formatVND, calculateTaxBreakdown } from '../utils/payrollCalculator';
+import * as XLSX from 'xlsx';
 
 interface PrintTaxReportModalProps {
   isOpen: boolean;
@@ -56,17 +57,151 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
     window.print();
   };
 
+  const handleExportExcel = () => {
+    const excelRows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      [`BẢNG TỔNG HỢP TÍNH THUẾ THU NHẬP CÁ NHÂN - THÁNG ${month}/${settings.currentYear}`],
+      ['(Thu nhập từ tiền lương, tiền công • Phân biệt các khoản chịu thuế và không chịu thuế)'],
+      [],
+      [
+        `Tổng NLĐ: ${employees.length} người`,
+        `Tổng Gross: ${formatVND(totalGross)}`,
+        `Tổng Miễn thuế: ${formatVND(totalTaxExemptIncome)}`,
+        `Tổng Giảm trừ: ${formatVND(totalDeductions)}`,
+        `Tổng Thuế TNCN: ${formatVND(totalTax)}`
+      ],
+      [],
+      [
+        'STT',
+        'Mã NV',
+        'Họ và Tên',
+        'Phòng Ban',
+        'MST TNCN',
+        'Lương Chính',
+        'OT Chịu Thuế (100%)',
+        'Phụ Cấp Tính Thuế',
+        'TỔNG CHỊU THUẾ [1]',
+        'OT Vượt Mức Miễn Thuế',
+        'Ăn Ca Định Mức',
+        'Phụ Cấp Miễn Thuế',
+        'TỔNG MIỄN THUẾ [2]',
+        'TỔNG THU NHẬP GROSS [3]=[1]+[2]',
+        'Giảm Trừ Bản Thân',
+        'Số NPT',
+        'Giảm Trừ NPT',
+        'BHXH Trừ Lương',
+        'Giảm Trừ Khác',
+        'TN TÍNH THUẾ [4]',
+        'Bậc Thuế Max',
+        'THUẾ TNCN KHẤU TRỪ [5]'
+      ],
+      ...payrolls.map((p, idx) => {
+        const emp = empMap.get(p.employeeId);
+        const mealCap = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+        const mealExempt = p.mealTaxExempt !== undefined ? p.mealTaxExempt : Math.min(p.mealAllowance || 0, mealCap);
+        const exempt = p.otPayTaxExempt + p.taxExemptAllowances + mealExempt;
+        const breakdown = calculateTaxBreakdown(p.assessableIncome, settings.taxBrackets);
+        return [
+          idx + 1,
+          emp?.employeeCode || '',
+          emp?.fullName || '',
+          depMap.get(emp?.departmentId || '') || '',
+          emp?.taxId || emp?.idCardNumber || '',
+          p.mainSalary,
+          p.otPayTaxable,
+          p.taxableAllowances,
+          p.taxableIncome,
+          p.otPayTaxExempt,
+          mealExempt,
+          p.taxExemptAllowances,
+          exempt,
+          p.grossIncome,
+          p.personalDeduction,
+          p.dependentCount,
+          p.dependentDeduction,
+          p.totalInsuranceEmp,
+          p.otherTaxDeduction || 0,
+          p.assessableIncome,
+          breakdown.highestBracket > 0 ? `Bậc ${breakdown.highestBracket}` : '0%',
+          p.personalIncomeTax
+        ];
+      }),
+      [
+        'TỔNG CỘNG TOÀN CÔNG TY',
+        '',
+        '',
+        '',
+        '',
+        payrolls.reduce((s, p) => s + p.mainSalary, 0),
+        payrolls.reduce((s, p) => s + p.otPayTaxable, 0),
+        payrolls.reduce((s, p) => s + p.taxableAllowances, 0),
+        totalTaxableIncome,
+        payrolls.reduce((s, p) => s + p.otPayTaxExempt, 0),
+        payrolls.reduce((s, p) => {
+          const cap = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
+          return s + (p.mealTaxExempt !== undefined ? p.mealTaxExempt : Math.min(p.mealAllowance || 0, cap));
+        }, 0),
+        payrolls.reduce((s, p) => s + p.taxExemptAllowances, 0),
+        totalTaxExemptIncome,
+        totalGross,
+        payrolls.reduce((s, p) => s + p.personalDeduction, 0),
+        payrolls.reduce((s, p) => s + p.dependentCount, 0),
+        payrolls.reduce((s, p) => s + p.dependentDeduction, 0),
+        payrolls.reduce((s, p) => s + p.totalInsuranceEmp, 0),
+        totalOtherTaxDeduction,
+        totalAssessableIncome,
+        '',
+        totalTax
+      ],
+      [],
+      [],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', '', '', '', 'GIÁM ĐỐC DOANH NGHIỆP'],
+      ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '', '', '', '', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
+      [],
+      [],
+      [
+        settings.reportPreparerName || 'Phạm Hồng Phúc',
+        '',
+        '',
+        settings.chiefAccountantName || 'Trần Thị Thu Hương',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        settings.directorName || 'Nguyễn Văn Thành'
+      ]
+    ];
+
+    const displayPeriod = month.includes('/') ? month : `${month}/${settings.currentYear}`;
+    const filePeriod = month.includes('/') ? month.replace(/\//g, '_') : `${month}_${settings.currentYear}`;
+    const ws = XLSX.utils.aoa_to_sheet(excelRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bang_Thue_TNCN');
+    XLSX.writeFile(wb, `Bang_Tong_Hop_Thue_TNCN_Thang_${filePeriod}.xlsx`);
+  };
+
+  const displayPeriod = month.includes('/') ? month : `${month}/${settings.currentYear}`;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[96vw] max-h-[96vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto print:p-0 print:bg-white">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[96vw] max-h-[96vh] flex flex-col overflow-hidden print:border-none print:shadow-none print:max-h-none print:max-w-none">
         {/* Top Control Bar (Hidden when printing) */}
-        <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between print:hidden">
+        <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between print:hidden shrink-0">
           <div className="flex items-center gap-2.5">
             <Receipt className="w-5 h-5 text-emerald-400" />
             <div>
               <h3 className="font-bold text-base">In Bảng Tổng Hợp Tính Thuế Thu Nhập Cá Nhân (TNCN)</h3>
               <p className="text-xs text-slate-400">
-                Khổ giấy A4 Ngang (Landscape) • Phân biệt rõ ràng các khoản chịu thuế và không chịu thuế • Tháng {month}
+                Khổ giấy A4 Ngang (Landscape) • Phân biệt rõ ràng các khoản chịu thuế và không chịu thuế • Kỳ: {displayPeriod}
               </p>
             </div>
           </div>
@@ -79,6 +214,13 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
               <span>In Ngay / Lưu PDF</span>
             </button>
             <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-sm font-semibold shadow-xs cursor-pointer transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
+            </button>
+            <button
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 cursor-pointer transition-colors"
             >
@@ -89,7 +231,55 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
 
         {/* Printable Paper Area */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-100 print:bg-white print:p-0">
-          <div className="bg-white mx-auto p-8 rounded-xl shadow-xs print:shadow-none print:p-2 max-w-[1400px] border border-slate-200 print:border-none text-slate-900">
+          <style dangerouslySetInnerHTML={{ __html: `
+            @media print {
+              @page {
+                size: A4 landscape;
+                margin: 6mm 4mm;
+              }
+              body {
+                visibility: hidden;
+                background: white !important;
+              }
+              #tax-report-print-sheet, #tax-report-print-sheet * {
+                visibility: visible;
+              }
+              #tax-report-print-sheet {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100% !important;
+                max-width: 100% !important;
+                display: block !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: white !important;
+              }
+              table {
+                font-size: 6.8pt !important;
+                width: 100% !important;
+                border-collapse: collapse !important;
+              }
+              thead {
+                display: table-header-group !important;
+              }
+              tr {
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+              }
+              th, td {
+                padding: 2px 1px !important;
+                min-width: 0 !important;
+              }
+              .print\\:hidden {
+                display: none !important;
+              }
+            }
+          `}} />
+
+          <div id="tax-report-print-sheet" className="bg-white mx-auto p-6 sm:p-8 rounded-xl shadow-xs print:shadow-none print:p-0 max-w-[1400px] print:max-w-none print:w-full border border-slate-200 print:border-none text-slate-900 print:text-[8.5px]">
             {/* Enterprise Header */}
             <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
               <div>
@@ -104,7 +294,6 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
               </div>
               <div className="text-right text-[11px] text-slate-600">
                 <span className="font-semibold block text-slate-700">Kỳ tính thuế: Tháng {month} / {settings.currentYear}</span>
-                <span className="block mt-0.5 text-slate-400">Ngày in: {new Date().toLocaleDateString('vi-VN')}</span>
               </div>
             </div>
 
@@ -117,7 +306,7 @@ export const PrintTaxReportModal: React.FC<PrintTaxReportModalProps> = ({
                 (Thu nhập từ tiền lương, tiền công • Phân biệt các khoản chịu thuế và không chịu thuế)
               </p>
               <div className="inline-block mt-2 px-3 py-1 bg-slate-100 rounded-full font-bold text-xs text-slate-800 border border-slate-300">
-                Kỳ tính thuế: Tháng {month} (Năm {settings.currentYear}) • Ngày in: {new Date().toLocaleDateString('vi-VN')}
+                Kỳ tính thuế: Tháng {month} (Năm {settings.currentYear})
               </div>
             </div>
 

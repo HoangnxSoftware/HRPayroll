@@ -1,7 +1,8 @@
 import React from 'react';
-import { Printer, X, Users } from 'lucide-react';
+import { Printer, X, Users, Download } from 'lucide-react';
 import { Employee, Department, Position, SystemSettings } from '../types';
 import { formatVND, getEmployeeWorkStatusDetails } from '../utils/payrollCalculator';
+import { exportEmployeesToExcel } from '../utils/excelHelper';
 
 interface PrintEmployeesModalProps {
   isOpen: boolean;
@@ -77,6 +78,13 @@ export const PrintEmployeesModal: React.FC<PrintEmployeesModalProps> = ({
               <span>In Ngay / Lưu PDF</span>
             </button>
             <button
+              onClick={() => exportEmployeesToExcel(employees, departments, positions)}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-sm font-semibold shadow-xs cursor-pointer transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
+            </button>
+            <button
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 cursor-pointer transition-colors"
             >
@@ -123,9 +131,6 @@ export const PrintEmployeesModal: React.FC<PrintEmployeesModalProps> = ({
               </div>
               <div className="text-right">
                 <div className="text-xs font-semibold text-slate-800">Sổ quản lý nhân sự nội bộ</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  Ngày in: {new Date().toLocaleDateString('vi-VN')}
-                </div>
                 <div className="text-[10px] text-emerald-800 font-bold mt-0.5">
                   Quy mô: {employees.length} lao động
                 </div>

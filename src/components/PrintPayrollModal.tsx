@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Printer, X, FileSpreadsheet, Building, Layers } from 'lucide-react';
+import { Printer, X, FileSpreadsheet, Building, Layers, Download } from 'lucide-react';
 import { Employee, PayrollRecord, SystemSettings, Department } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
+import * as XLSX from 'xlsx';
 
 interface PrintPayrollModalProps {
   isOpen: boolean;
@@ -112,6 +113,119 @@ export const PrintPayrollModal: React.FC<PrintPayrollModalProps> = ({
     window.print();
   };
 
+  const handleExportExcel = () => {
+    const targetPayrolls = currentPayrolls;
+    const excelRows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      [`BẢNG THANH TOÁN LƯƠNG & THU NHẬP - THÁNG ${month}/${settings.currentYear}`],
+      [selectedDept ? `Phòng ban: ${selectedDept.name}` : 'Toàn bộ doanh nghiệp'],
+      [],
+      [
+        'STT',
+        'Mã NV',
+        'Số CCCD',
+        'Họ và Tên',
+        'Phòng Ban',
+        'Chức Vụ',
+        'Lương Cơ Bản',
+        'Công Chuẩn',
+        'Công Thực Tế',
+        'Lương Thời Gian',
+        'Làm Thêm Giờ (OT)',
+        'Ăn Ca & Phụ Cấp',
+        'Tổng Thu Nhập (Gross)',
+        'BHXH Trừ Lương (10.5%)',
+        'Thuế TNCN',
+        'Giảm Trừ Khác',
+        'Lương Thực Lĩnh (Net)',
+        'BHXH DN Đóng',
+        'Ký Nhận'
+      ],
+      ...targetPayrolls.map((p, idx) => {
+        const emp = empMap.get(p.employeeId);
+        const dep = (settings.departments || []).find(d => d.id === emp?.departmentId);
+        const pos = (settings.positions || []).find(pos => pos.id === emp?.positionId);
+        const totalOt = (p.otPayTaxable || 0) + (p.otPayTaxExempt || 0);
+        const totalAllowances = (p.taxableAllowances || 0) + (p.taxExemptAllowances || 0) + (p.mealAllowance || 0);
+        return [
+          idx + 1,
+          emp?.employeeCode || '',
+          emp?.idCardNumber || '',
+          emp?.fullName || '',
+          dep?.name || '',
+          pos?.name || '',
+          Number(emp?.baseSalary) || Number(p.baseSalary) || 0,
+          p.standardDays || settings.standardWorkDays || 24,
+          p.actualWorkDays || 0,
+          p.mainSalary || 0,
+          totalOt,
+          totalAllowances,
+          p.grossIncome || 0,
+          p.totalInsuranceEmp || 0,
+          p.personalIncomeTax || 0,
+          p.otherDeductions || 0,
+          p.netSalary || 0,
+          p.totalInsuranceEmployer || 0,
+          ''
+        ];
+      }),
+      [
+        'TỔNG CỘNG',
+        '',
+        '',
+        '',
+        '',
+        '',
+        targetPayrolls.reduce((sum, p) => {
+          const emp = empMap.get(p.employeeId);
+          return sum + (Number(emp?.baseSalary) || Number(p.baseSalary) || 0);
+        }, 0),
+        '',
+        targetPayrolls.reduce((sum, p) => sum + (p.actualWorkDays || 0), 0),
+        targetPayrolls.reduce((sum, p) => sum + (p.mainSalary || 0), 0),
+        targetPayrolls.reduce((sum, p) => sum + (p.otPayTaxable || 0) + (p.otPayTaxExempt || 0), 0),
+        targetPayrolls.reduce((sum, p) => sum + (p.taxableAllowances || 0) + (p.taxExemptAllowances || 0) + (p.mealAllowance || 0), 0),
+        targetPayrolls.reduce((sum, p) => sum + (p.grossIncome || 0), 0),
+        targetPayrolls.reduce((sum, p) => sum + (p.totalInsuranceEmp || 0), 0),
+        targetPayrolls.reduce((sum, p) => sum + (p.personalIncomeTax || 0), 0),
+        targetPayrolls.reduce((sum, p) => sum + (p.otherDeductions || 0), 0),
+        targetPayrolls.reduce((sum, p) => sum + (p.netSalary || 0), 0),
+        targetPayrolls.reduce((sum, p) => sum + (p.totalInsuranceEmployer || 0), 0),
+        ''
+      ],
+      [],
+      [],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', '', 'GIÁM ĐỐC DOANH NGHIỆP'],
+      ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '', '', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
+      [],
+      [],
+      [
+        settings.reportPreparerName || 'Phạm Hồng Phúc',
+        '',
+        '',
+        settings.chiefAccountantName || 'Trần Thị Thu Hương',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        settings.directorName || 'Nguyễn Văn Thành'
+      ]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(excelRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bang_Luong');
+    const safeMonth = String(month).replace(/\//g, '_');
+    XLSX.writeFile(wb, `Bang_Luong_Thang_${safeMonth}_${settings.currentYear}.xlsx`);
+  };
+
   /**
    * Render bảng lương hoàn chỉnh cho một đơn vị / phòng ban
    */
@@ -155,9 +269,6 @@ export const PrintPayrollModal: React.FC<PrintPayrollModalProps> = ({
                 Phòng ban: {department.name}
               </div>
             )}
-            <div className="text-[10px] text-slate-400 mt-0.5">
-              Ngày in: {new Date().toLocaleDateString('vi-VN')}
-            </div>
           </div>
         </div>
 
@@ -463,6 +574,14 @@ export const PrintPayrollModal: React.FC<PrintPayrollModalProps> = ({
             >
               <Printer className="w-4 h-4" />
               <span>In Ngay / Lưu PDF</span>
+            </button>
+
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-sm font-semibold shadow-xs cursor-pointer transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
             </button>
 
             <button

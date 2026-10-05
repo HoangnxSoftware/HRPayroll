@@ -33,20 +33,49 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
   const [editingDep, setEditingDep] = useState<Dependent | null>(null);
   const [importNotification, setImportNotification] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const defaultDeduction = settings?.dependentDeduction || 4400000;
 
   const [formData, setFormData] = useState<Partial<Dependent>>({
-    employeeId: employees[0]?.id || '',
+    employeeId: '',
     fullName: '',
     taxCodeOrId: '',
     relationship: 'Con đẻ/Con nuôi',
     birthDate: '2018-01-01',
     startDate: '2024-01',
     endDate: '',
-    deductionAmount: 4400000,
+    deductionAmount: defaultDeduction,
     note: ''
   });
 
-  const empMap = new Map(employees.map(e => [e.id, e]));
+  const [empSearchQuery, setEmpSearchQuery] = useState('');
+  const [isEmpSearchOpen, setIsEmpSearchOpen] = useState(false);
+
+  const empMap = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees]);
+  const depMap = useMemo(() => new Map((settings?.departments || []).map(d => [d.id, d.name])), [settings?.departments]);
+
+  const matchingEmployees = useMemo(() => {
+    const q = empSearchQuery.trim().toLowerCase();
+    if (!q) return employees.slice(0, 25);
+    return employees.filter(e => {
+      const matchName = e.fullName.toLowerCase().includes(q);
+      const matchCode = e.employeeCode.toLowerCase().includes(q);
+      const matchCccd = e.idCardNumber ? e.idCardNumber.includes(q) : false;
+      return matchName || matchCode || matchCccd;
+    }).slice(0, 25);
+  }, [employees, empSearchQuery]);
+
+  const calculateAge = (birthDateStr?: string) => {
+    if (!birthDateStr) return '—';
+    const b = new Date(birthDateStr);
+    if (isNaN(b.getTime())) return '—';
+    const today = new Date();
+    let age = today.getFullYear() - b.getFullYear();
+    const m = today.getMonth() - b.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < b.getDate())) {
+      age--;
+    }
+    return age >= 0 ? `${age} tuổi` : '—';
+  };
 
   // Tập hợp các số CCCD NLĐ bị trùng lặp giữa các nhân viên khác nhau
   const duplicateEmpIdCards = useMemo(() => {
@@ -90,16 +119,18 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
 
   const handleOpenAdd = () => {
     setEditingDep(null);
+    setEmpSearchQuery('');
+    setIsEmpSearchOpen(false);
     setFormData({
       id: `dep-${Date.now()}`,
-      employeeId: employees[0]?.id || '',
+      employeeId: '',
       fullName: '',
       taxCodeOrId: '',
       relationship: 'Con đẻ/Con nuôi',
       birthDate: '2018-01-01',
       startDate: '2024-01',
       endDate: '',
-      deductionAmount: 4400000,
+      deductionAmount: defaultDeduction,
       note: ''
     });
     setIsModalOpen(true);
@@ -107,27 +138,36 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
 
   const handleOpenEdit = (dep: Dependent) => {
     setEditingDep(dep);
-    setFormData(dep);
+    setEmpSearchQuery('');
+    setIsEmpSearchOpen(false);
+    setFormData({
+      ...dep,
+      deductionAmount: dep.deductionAmount || defaultDeduction
+    });
     setIsModalOpen(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.fullName || !formData.employeeId) {
-      alert('Vui lòng chọn Nhân viên và nhập Họ tên người phụ thuộc!');
+    if (!formData.employeeId) {
+      alert('Vui lòng tìm kiếm và chọn Nhân viên liên quan!');
+      return;
+    }
+    if (!formData.fullName) {
+      alert('Vui lòng nhập Họ và tên người phụ thuộc!');
       return;
     }
 
     const item: Dependent = {
       id: formData.id || `dep-${Date.now()}`,
-      employeeId: formData.employeeId || employees[0]?.id || '',
+      employeeId: formData.employeeId,
       fullName: formData.fullName || '',
       taxCodeOrId: formData.taxCodeOrId || '',
       relationship: formData.relationship as RelationshipType || 'Con đẻ/Con nuôi',
       birthDate: formData.birthDate || '2018-01-01',
       startDate: formData.startDate || '2024-01',
       endDate: formData.endDate || '',
-      deductionAmount: Number(formData.deductionAmount) || 4400000,
+      deductionAmount: Number(formData.deductionAmount) || defaultDeduction,
       note: formData.note || ''
     };
 
@@ -151,6 +191,7 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
         'CCCD / Mã Định Danh / MST NPT': d.taxCodeOrId,
         'Mối Quan Hệ': d.relationship,
         'Ngày Sinh': d.birthDate,
+        'Tuổi': calculateAge(d.birthDate),
         'Bắt Đầu Giảm Trừ': d.startDate,
         'Kết Thúc Giảm Trừ': d.endDate || 'Hiện tại',
         'Mức Giảm Trừ (VNĐ/tháng)': d.deductionAmount,
@@ -297,6 +338,7 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
                 <th className="px-4 py-3">CCCD / Mã Số NPT</th>
                 <th className="px-4 py-3">Mối Quan Hệ</th>
                 <th className="px-4 py-3">Ngày Sinh</th>
+                <th className="px-4 py-3 text-center">Tuổi</th>
                 <th className="px-4 py-3">Thời Gian Giảm Trừ</th>
                 <th className="px-4 py-3 text-right">Mức Giảm Trừ</th>
                 <th className="px-4 py-3">Ghi Chú</th>
@@ -357,6 +399,9 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
                       <td className="px-4 py-3.5 text-slate-600 font-mono">
                         {dep.birthDate}
                       </td>
+                      <td className="px-4 py-3.5 text-center font-mono font-bold text-slate-700">
+                        {calculateAge(dep.birthDate)}
+                      </td>
                       <td className="px-4 py-3.5 font-mono text-slate-700">
                         <span>{dep.startDate}</span>
                         <span className="text-slate-400"> đến </span>
@@ -405,19 +450,96 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Nhân Viên Liên Quan *</label>
-                <select
-                  required
-                  value={formData.employeeId}
-                  onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg font-medium"
-                >
-                  {employees.map(e => (
-                    <option key={e.id} value={e.id}>
-                      {e.employeeCode} - {e.fullName}{e.idCardNumber ? ` (CCCD: ${e.idCardNumber})` : ''}
-                    </option>
-                  ))}
-                </select>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Nhân Viên Liên Quan *
+                </label>
+                {formData.employeeId && empMap.get(formData.employeeId) ? (
+                  <div className="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-300 rounded-xl">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white font-bold flex items-center justify-center text-xs shadow-xs">
+                        {empMap.get(formData.employeeId)?.fullName.slice(0, 1) || 'NV'}
+                      </div>
+                      <div>
+                        <div className="font-bold text-slate-900 text-xs flex items-center gap-2">
+                          <span>{empMap.get(formData.employeeId)?.fullName}</span>
+                          <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-emerald-200/80 text-emerald-950 font-bold">
+                            {empMap.get(formData.employeeId)?.employeeCode}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-600 font-mono mt-0.5">
+                          Số CCCD: <strong className="text-slate-800">{empMap.get(formData.employeeId)?.idCardNumber || 'Chưa cập nhật'}</strong>
+                          {empMap.get(formData.employeeId)?.departmentId && ` • Phòng ban: ${depMap.get(empMap.get(formData.employeeId)!.departmentId) || ''}`}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData({ ...formData, employeeId: '' });
+                        setEmpSearchQuery('');
+                        setIsEmpSearchOpen(true);
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-white hover:bg-emerald-100 border border-emerald-300 rounded-lg cursor-pointer transition-colors shadow-2xs"
+                    >
+                      Đổi Nhân Viên
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        placeholder="Tìm theo Tên NV, Số CCCD hoặc Mã NV..."
+                        value={empSearchQuery}
+                        onFocus={() => setIsEmpSearchOpen(true)}
+                        onChange={e => {
+                          setEmpSearchQuery(e.target.value);
+                          setIsEmpSearchOpen(true);
+                        }}
+                        className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg font-medium text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {isEmpSearchOpen && (
+                      <div className="absolute z-30 top-full left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl divide-y divide-slate-100">
+                        {matchingEmployees.length === 0 ? (
+                          <div className="p-3 text-center text-slate-400 text-xs">
+                            Không tìm thấy nhân viên nào phù hợp
+                          </div>
+                        ) : (
+                          matchingEmployees.map(e => (
+                            <div
+                              key={e.id}
+                              onClick={() => {
+                                setFormData({ ...formData, employeeId: e.id });
+                                setIsEmpSearchOpen(false);
+                                setEmpSearchQuery('');
+                              }}
+                              className="p-2.5 hover:bg-emerald-50/80 cursor-pointer transition-colors flex items-center justify-between text-xs"
+                            >
+                              <div>
+                                <div className="font-bold text-slate-900">
+                                  {e.fullName}
+                                  <span className="ml-2 font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
+                                    {e.employeeCode}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                  CCCD: <strong className="text-slate-800">{e.idCardNumber || '—'}</strong>
+                                  {e.departmentId && ` • ${depMap.get(e.departmentId) || ''}`}
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-lg">
+                                Chọn
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -494,7 +616,12 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Mức Giảm Trừ (VNĐ/tháng)</label>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Mức Giảm Trừ (VNĐ/tháng) *
+                  <span className="text-emerald-700 font-normal ml-2">
+                    (Mặc định từ cài đặt hệ thống: {formatVND(defaultDeduction)}/tháng)
+                  </span>
+                </label>
                 <input
                   type="number"
                   step={100000}

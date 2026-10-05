@@ -37,6 +37,12 @@ interface SettingsViewProps {
 export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings }) => {
   const { canEditSettings } = useAuthRole();
   const [formData, setFormData] = useState<SystemSettings>(settings);
+
+  // Sync formData whenever settings prop updates (e.g. from Google Sheets import or session restore)
+  React.useEffect(() => {
+    setFormData(settings);
+  }, [settings]);
+
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'departments' | 'positions' | 'holidays' | 'payroll_rules'>('general');
   const [standardConfigYear, setStandardConfigYear] = useState<number>(settings.currentYear || 2026);

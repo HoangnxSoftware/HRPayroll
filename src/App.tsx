@@ -64,14 +64,123 @@ function PayrollAppContent() {
     }
   }, [currentUserRole, activeTab]);
 
-  // Core Data States
-  const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
-  const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
-  const [dependents, setDependents] = useState<Dependent[]>(INITIAL_DEPENDENTS);
-  const [insurances, setInsurances] = useState<InsuranceRecord[]>(INITIAL_INSURANCES);
-  const [mealRegistrations, setMealRegistrations] = useState<MealRegistration[]>(INITIAL_MEAL_REGISTRATIONS);
-  const [specialAllowances, setSpecialAllowances] = useState<SpecialAllowance[]>(INITIAL_SPECIAL_ALLOWANCES);
-  const [timekeepings, setTimekeepings] = useState<TimekeepingRecord[]>(INITIAL_TIMEKEEPINGS);
+  // Core Data States (persisted in localStorage to preserve company settings across logout/login)
+  const [settings, setSettings] = useState<SystemSettings>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_system_settings');
+      if (saved) {
+        return { ...INITIAL_SETTINGS, ...JSON.parse(saved) };
+      }
+    } catch (e) {
+      console.warn('Lỗi đọc settings từ localStorage:', e);
+    }
+    return INITIAL_SETTINGS;
+  });
+
+  const [employees, setEmployees] = useState<Employee[]>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_employees_data');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Lỗi đọc employees từ localStorage:', e);
+    }
+    return INITIAL_EMPLOYEES;
+  });
+
+  const [dependents, setDependents] = useState<Dependent[]>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_dependents_data');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Lỗi đọc dependents từ localStorage:', e);
+    }
+    return INITIAL_DEPENDENTS;
+  });
+
+  const [insurances, setInsurances] = useState<InsuranceRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_insurances_data');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Lỗi đọc insurances từ localStorage:', e);
+    }
+    return INITIAL_INSURANCES;
+  });
+
+  const [mealRegistrations, setMealRegistrations] = useState<MealRegistration[]>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_meals_data');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Lỗi đọc meals từ localStorage:', e);
+    }
+    return INITIAL_MEAL_REGISTRATIONS;
+  });
+
+  const [specialAllowances, setSpecialAllowances] = useState<SpecialAllowance[]>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_allowances_data');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Lỗi đọc allowances từ localStorage:', e);
+    }
+    return INITIAL_SPECIAL_ALLOWANCES;
+  });
+
+  const [timekeepings, setTimekeepings] = useState<TimekeepingRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('payroll_timekeepings_data');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Lỗi đọc timekeepings từ localStorage:', e);
+    }
+    return INITIAL_TIMEKEEPINGS;
+  });
+
+  // Tự động lưu cấu hình và dữ liệu vào localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('payroll_system_settings', JSON.stringify(settings));
+    } catch (e) {
+      console.warn('Lỗi lưu settings:', e);
+    }
+  }, [settings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('payroll_employees_data', JSON.stringify(employees));
+    } catch (e) {}
+  }, [employees]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('payroll_dependents_data', JSON.stringify(dependents));
+    } catch (e) {}
+  }, [dependents]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('payroll_insurances_data', JSON.stringify(insurances));
+    } catch (e) {}
+  }, [insurances]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('payroll_meals_data', JSON.stringify(mealRegistrations));
+    } catch (e) {}
+  }, [mealRegistrations]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('payroll_allowances_data', JSON.stringify(specialAllowances));
+    } catch (e) {}
+  }, [specialAllowances]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('payroll_timekeepings_data', JSON.stringify(timekeepings));
+    } catch (e) {}
+  }, [timekeepings]);
 
   // Sync State with Google Sheets / Drive (Persisted across sessions)
   const [syncState, setSyncState] = useState<GoogleSyncState>(() => {
@@ -283,6 +392,15 @@ function PayrollAppContent() {
       throw err;
     }
   };
+
+  // Tự động đồng bộ từ Google Sheets nếu đã kết nối trước đó
+  useEffect(() => {
+    if (syncState.isConnected && syncState.spreadsheetId) {
+      handleLoadDataFromSpreadsheet(syncState.spreadsheetId, syncState.spreadsheetName || undefined).catch(err => {
+        console.warn('Không thể tự động tải từ Google Sheets khi khởi động:', err);
+      });
+    }
+  }, [syncState.isConnected, syncState.spreadsheetId]);
 
   // Handler: Reset to local demo data
   const handleResetToDemoData = () => {
@@ -597,6 +715,7 @@ function PayrollAppContent() {
               departments={settings.departments}
               positions={settings.positions}
               settings={settings}
+              insurances={insurances}
               onAddEmployee={handleAddEmployeeClick}
               onEditEmployee={handleEditEmployeeClick}
               onDeleteEmployee={handleDeleteEmployee}

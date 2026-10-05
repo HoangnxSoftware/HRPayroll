@@ -11,10 +11,12 @@ import {
   Filter, 
   AlertCircle,
   Building2,
-  DollarSign
+  DollarSign,
+  Download
 } from 'lucide-react';
 import { Employee, PayrollRecord, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
+import * as XLSX from 'xlsx';
 
 interface SinglePayslipCardProps {
   emp: Employee;
@@ -393,6 +395,69 @@ export const PrintSlipModal: React.FC<PrintSlipModalProps> = ({
     window.print();
   };
 
+  const handleExportExcel = () => {
+    if (targetEmployees.length === 0) return;
+    const wb = XLSX.utils.book_new();
+
+    targetEmployees.forEach(emp => {
+      const p = empPayrollMap.get(emp.id);
+      if (!p) return;
+      const depName = depMap.get(emp.departmentId) || 'Chưa phân phòng';
+      const posName = posMap.get(emp.positionId) || 'Nhân viên';
+      const totalOt = (p.otPayTaxable || 0) + (p.otPayTaxExempt || 0);
+
+      const rows: any[][] = [
+        [settings.companyName.toUpperCase()],
+        [`Địa chỉ: ${settings.address}`],
+        [`Mã số thuế: ${settings.taxCode} | SĐT: ${settings.phoneNumber}`],
+        [],
+        ['PHIẾU THANH TOÁN LƯƠNG & THU NHẬP'],
+        [`Kỳ chi trả: Tháng ${month} / ${settings.currentYear}`],
+        [],
+        ['THÔNG TIN NGƯỜI LAO ĐỘNG'],
+        ['Họ và tên:', emp.fullName, '', 'Mã nhân viên:', emp.employeeCode],
+        ['Số CCCD:', emp.idCardNumber || '—', '', 'Phòng ban:', depName],
+        ['Chức vụ:', posName, '', 'Số tài khoản:', emp.bankAccount || 'Tiền mặt'],
+        ['Ngân hàng:', emp.bankName || '—', '', 'Hình thức lương:', emp.salaryBasis === 'hourly' ? 'Theo giờ' : 'Lương tháng'],
+        [],
+        ['I. CÁC KHOẢN THU NHẬP', 'SỐ TIỀN (VNĐ)', '', 'II. CÁC KHOẢN KHẤU TRỪ', 'SỐ TIỀN (VNĐ)'],
+        ['1. Lương cơ bản / thỏa thuận', emp.baseSalary, '', '1. BHXH trừ lương (8%)', p.socialInsuranceEmp],
+        ['2. Lương chính theo công / giờ', p.mainSalary, '', '2. BHYT trừ lương (1.5%)', p.healthInsuranceEmp],
+        ['3. Làm thêm giờ chịu thuế', p.otPayTaxable, '', '3. BHTN trừ lương (1%)', p.unempInsuranceEmp],
+        ['4. Làm thêm giờ miễn thuế', p.otPayTaxExempt, '', '4. Tổng BHXH khấu trừ', p.totalInsuranceEmp],
+        ['5. Phụ cấp tính thuế TNCN', p.taxableAllowances, '', '5. Thuế TNCN khấu trừ', p.personalIncomeTax],
+        ['6. Phụ cấp miễn thuế', p.taxExemptAllowances, '', '6. Các khoản giảm trừ khác', p.otherDeductions || 0],
+        ['7. Tiền ăn trưa / ăn ca', p.mealAllowance, '', '', ''],
+        ['TỔNG THU NHẬP (GROSS)', p.grossIncome, '', 'TỔNG CÁC KHOẢN TRỪ', p.totalInsuranceEmp + p.personalIncomeTax + (p.otherDeductions || 0)],
+        [],
+        ['III. LƯƠNG THỰC LĨNH (NET)', p.netSalary],
+        ['(Bằng chữ)', ''],
+        [],
+        ['IV. BẢO HIỂM DOANH NGHIỆP ĐÓNG', ''],
+        ['BHXH Doanh nghiệp (17.5%)', p.socialInsuranceEmployer],
+        ['BHYT Doanh nghiệp (3%)', p.healthInsuranceEmployer],
+        ['BHTN Doanh nghiệp (1%)', p.unempInsuranceEmployer],
+        ['Kinh phí Công đoàn (2%)', p.tradeUnionEmployer],
+        ['Tổng DN đóng thêm', p.totalInsuranceEmployer],
+        [],
+        ['NGƯỜI NHẬN LƯƠNG', '', '', 'KẾ TOÁN TRƯỞNG', 'GIÁM ĐỐC'],
+        ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '(Ký tên, đóng dấu)'],
+        [],
+        [],
+        [emp.fullName, '', '', settings.chiefAccountantName || '', settings.directorName || '']
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      // Clean sheet title (max 31 chars, no invalid chars)
+      const safeCode = (emp.employeeCode || emp.fullName).replace(/[:\\\/\?\*\[\]]/g, '').slice(0, 25);
+      const sheetTitle = `${safeCode}_T${String(month).replace(/\//g, '_')}`.slice(0, 31);
+      XLSX.utils.book_append_sheet(wb, ws, sheetTitle);
+    });
+
+    const safeMonth = String(month).replace(/\//g, '_');
+    XLSX.writeFile(wb, `Phieu_Luong_Thang_${safeMonth}_${settings.currentYear}.xlsx`);
+  };
+
   const isBatchMode = !selectedEmployeeId;
 
   return (
@@ -431,6 +496,19 @@ export const PrintSlipModal: React.FC<PrintSlipModalProps> = ({
             >
               <Printer className="w-4 h-4" />
               <span>In Phiếu Lương ({targetEmployees.length})</span>
+            </button>
+            <button
+              onClick={handleExportExcel}
+              disabled={targetEmployees.length === 0}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer ${
+                targetEmployees.length > 0 
+                  ? 'bg-emerald-700 hover:bg-emerald-800 text-white active:scale-95' 
+                  : 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-60'
+              }`}
+              title="Kết xuất phiếu lương các nhân viên đã chọn ra file Excel"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
             </button>
             <button
               onClick={onClose}

@@ -1,7 +1,8 @@
 import React from 'react';
-import { Printer, X, Calendar, TrendingUp } from 'lucide-react';
+import { Printer, X, TrendingUp, Download } from 'lucide-react';
 import { Employee, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
+import * as XLSX from 'xlsx';
 
 export interface AnnualEmployeeData {
   employee: Employee;
@@ -67,17 +68,129 @@ export const PrintAnnualPayrollModal: React.FC<PrintAnnualPayrollModalProps> = (
     return dupSet;
   }, [annualData]);
 
-  const currentDateStr = new Date().toLocaleDateString('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  });
+  const handleExportExcel = () => {
+    const excelRows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      [`BÁO CÁO LƯƠNG & THU NHẬP TOÀN BỘ LAO ĐỘNG CẢ NĂM ${year}`],
+      ['(Theo dõi chi trả 12 tháng, tổng thu nhập Gross, trích nộp BHXH, thuế TNCN và lương thực lĩnh)'],
+      [],
+      [
+        'STT',
+        'Mã NV',
+        'Số CCCD',
+        'Họ và Tên',
+        'Phòng Ban',
+        'Chức Vụ',
+        'T1',
+        'T2',
+        'T3',
+        'T4',
+        'T5',
+        'T6',
+        'T7',
+        'T8',
+        'T9',
+        'T10',
+        'T11',
+        'T12',
+        'Tổng Lương CB',
+        'Tổng Thu Nhập Gross',
+        'Tổng BHXH Trừ Lương',
+        'Tổng Thuế TNCN Khấu Trừ',
+        'Tổng Thực Lĩnh Cả Năm',
+        'Bình Quân / Tháng'
+      ],
+      ...annualData.map((row, idx) => [
+        idx + 1,
+        row.employee.employeeCode,
+        row.employee.idCardNumber || '',
+        row.employee.fullName,
+        row.departmentName,
+        row.positionName,
+        row.monthlyNet[1] || 0,
+        row.monthlyNet[2] || 0,
+        row.monthlyNet[3] || 0,
+        row.monthlyNet[4] || 0,
+        row.monthlyNet[5] || 0,
+        row.monthlyNet[6] || 0,
+        row.monthlyNet[7] || 0,
+        row.monthlyNet[8] || 0,
+        row.monthlyNet[9] || 0,
+        row.monthlyNet[10] || 0,
+        row.monthlyNet[11] || 0,
+        row.monthlyNet[12] || 0,
+        row.totalBaseSalaryYear,
+        row.totalGrossYear,
+        row.totalInsuranceEmpYear,
+        row.totalTaxYear,
+        row.totalNetYear,
+        Math.round(row.avgMonthlyNet)
+      ]),
+      [
+        'TỔNG CỘNG TOÀN CÔNG TY',
+        '',
+        '',
+        '',
+        '',
+        '',
+        monthlyTotals[1] || 0,
+        monthlyTotals[2] || 0,
+        monthlyTotals[3] || 0,
+        monthlyTotals[4] || 0,
+        monthlyTotals[5] || 0,
+        monthlyTotals[6] || 0,
+        monthlyTotals[7] || 0,
+        monthlyTotals[8] || 0,
+        monthlyTotals[9] || 0,
+        monthlyTotals[10] || 0,
+        monthlyTotals[11] || 0,
+        monthlyTotals[12] || 0,
+        totalBaseAll,
+        totalGrossAll,
+        totalInsAll,
+        totalTaxAll,
+        totalNetAll,
+        Math.round(totalNetAll / 12)
+      ],
+      [],
+      [],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', '', '', '', 'GIÁM ĐỐC / NGƯỜI ĐẠI DIỆN'],
+      ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '', '', '', '', '', '', '', '(Ký tên, đóng dấu)'],
+      [],
+      [],
+      [
+        settings.reportPreparerName || 'Phạm Hồng Phúc',
+        '',
+        '',
+        settings.chiefAccountantName || 'Trần Thị Thu Hương',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        settings.directorName || 'Nguyễn Văn Thành'
+      ]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(excelRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Luong_Ca_Nam_${year}`);
+    XLSX.writeFile(wb, `Bao_Cao_Luong_Toan_Bo_Lao_Dong_Nam_${year}.xlsx`);
+  };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print:p-0 print:bg-white print:static">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[95vh] flex flex-col print:shadow-none print:border-none print:max-h-none print:max-w-none print:w-full print:rounded-none">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print:p-0 print:bg-white">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[95vh] flex flex-col overflow-hidden print:border-none print:shadow-none print:max-h-none print:max-w-none">
         {/* Header Modal Bar (Hidden on print) */}
-        <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200 bg-slate-50 rounded-t-2xl print:hidden">
+        <div className="flex items-center justify-between px-6 py-3 border-b border-slate-200 bg-slate-50 rounded-t-2xl print:hidden shrink-0">
           <div className="flex items-center gap-2">
             <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
               <TrendingUp className="w-5 h-5" />
@@ -96,6 +209,13 @@ export const PrintAnnualPayrollModal: React.FC<PrintAnnualPayrollModalProps> = (
               <span>In Ngay / Lưu PDF</span>
             </button>
             <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-sm rounded-xl shadow-md shadow-emerald-700/20 transition-all cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
+            </button>
+            <button
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
             >
@@ -105,8 +225,56 @@ export const PrintAnnualPayrollModal: React.FC<PrintAnnualPayrollModalProps> = (
         </div>
 
         {/* Printable Paper Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-100/50 print:bg-white print:p-0 print:overflow-visible">
-          <div className="bg-white p-6 sm:p-8 rounded-xl shadow-sm border border-slate-200 max-w-[1400px] mx-auto print:border-none print:shadow-none print:p-0 text-slate-900 print:text-[9px] text-[11px] leading-tight">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-100/50 print:bg-white print:p-0">
+          <style dangerouslySetInnerHTML={{ __html: `
+            @media print {
+              @page {
+                size: A4 landscape;
+                margin: 6mm 4mm;
+              }
+              body {
+                visibility: hidden;
+                background: white !important;
+              }
+              #annual-payroll-print-container, #annual-payroll-print-container * {
+                visibility: visible;
+              }
+              #annual-payroll-print-container {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100% !important;
+                max-width: 100% !important;
+                display: block !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: white !important;
+              }
+              table {
+                font-size: 6.8pt !important;
+                width: 100% !important;
+                border-collapse: collapse !important;
+              }
+              thead {
+                display: table-header-group !important;
+              }
+              tr {
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+              }
+              th, td {
+                padding: 2px 1px !important;
+                min-width: 0 !important;
+              }
+              .print\\:hidden {
+                display: none !important;
+              }
+            }
+          `}} />
+
+          <div id="annual-payroll-print-container" className="bg-white p-6 sm:p-8 rounded-xl shadow-sm border border-slate-200 max-w-[1400px] mx-auto print:max-w-none print:w-full print:border-none print:shadow-none print:p-0 text-slate-900 print:text-[8.5px] text-[11px] leading-tight">
             {/* Header Doanh Nghiệp */}
             <div className="flex justify-between items-start border-b border-slate-300 pb-3 mb-4">
               <div>
@@ -116,7 +284,6 @@ export const PrintAnnualPayrollModal: React.FC<PrintAnnualPayrollModalProps> = (
               </div>
               <div className="text-right text-[10px] text-slate-500">
                 <p>Năm tài chính: <strong className="text-slate-800">{year}</strong></p>
-                <p>Ngày in: {currentDateStr}</p>
               </div>
             </div>
 
@@ -144,30 +311,30 @@ export const PrintAnnualPayrollModal: React.FC<PrintAnnualPayrollModalProps> = (
                     <th className="border border-slate-400 p-1 text-center" colSpan={12}>
                       Lương Thực Lĩnh Từng Tháng Trong Năm {year} (VNĐ)
                     </th>
-                    <th className="border border-slate-400 p-1 min-w-[85px] bg-slate-50" rowSpan={2}>Tổng Lương CB Cả Năm</th>
-                    <th className="border border-slate-400 p-1 min-w-[85px] bg-slate-50" rowSpan={2}>Tổng Gross Cả Năm</th>
-                    <th className="border border-slate-400 p-1 min-w-[75px] bg-slate-50" rowSpan={2}>Tổng BHXH Trừ Lương</th>
+                    <th className="border border-slate-400 p-1 min-w-[80px] bg-slate-50" rowSpan={2}>Tổng Lương CB</th>
+                    <th className="border border-slate-400 p-1 min-w-[90px] bg-slate-50" rowSpan={2}>Tổng Gross Năm</th>
+                    <th className="border border-slate-400 p-1 min-w-[75px] bg-slate-50" rowSpan={2}>Tổng BHXH</th>
                     <th className="border border-slate-400 p-1 min-w-[75px] bg-slate-50" rowSpan={2}>Tổng Thuế TNCN</th>
                     <th className="border border-slate-400 p-1 min-w-[95px] bg-emerald-50 text-emerald-950 font-black" rowSpan={2}>
-                      Tổng Thực Lĩnh Cả Năm (Net)
+                      Tổng Thực Lĩnh
                     </th>
-                    <th className="border border-slate-400 p-1 min-w-[80px] bg-emerald-50 text-emerald-950" rowSpan={2}>
+                    <th className="border border-slate-400 p-1 min-w-[75px] bg-emerald-50 text-emerald-950" rowSpan={2}>
                       Bình Quân / Tháng
                     </th>
                   </tr>
                   <tr className="bg-slate-50 font-semibold text-slate-700 text-[10px]">
-                    <th className="border border-slate-400 p-0.5 w-14">T1</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T2</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T3</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T4</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T5</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T6</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T7</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T8</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T9</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T10</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T11</th>
-                    <th className="border border-slate-400 p-0.5 w-14">T12</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T1</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T2</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T3</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T4</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T5</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T6</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T7</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T8</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T9</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T10</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T11</th>
+                    <th className="border border-slate-400 p-0.5 w-14 print:w-auto">T12</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -260,45 +427,30 @@ export const PrintAnnualPayrollModal: React.FC<PrintAnnualPayrollModalProps> = (
               <div>
                 <p className="font-bold text-slate-900 uppercase">Người Lập Biểu</p>
                 <p className="text-[10px] text-slate-500 italic mt-0.5">(Ký, ghi rõ họ tên)</p>
-                <div className="h-16"></div>
-                <p className="font-bold text-slate-900">{settings.reportPreparerName || 'Phạm Hồng Phúc'}</p>
+                <div className="h-14 flex items-end justify-center font-bold text-slate-800">
+                  {settings.reportPreparerName || 'Phạm Hồng Phúc'}
+                </div>
               </div>
 
               <div>
                 <p className="font-bold text-slate-900 uppercase">Kế Toán Trưởng</p>
                 <p className="text-[10px] text-slate-500 italic mt-0.5">(Ký, ghi rõ họ tên)</p>
-                <div className="h-16"></div>
-                <p className="font-bold text-slate-900">{settings.chiefAccountantName || 'Trần Thị Thu Hương'}</p>
+                <div className="h-14 flex items-end justify-center font-bold text-slate-800">
+                  {settings.chiefAccountantName || 'Trần Thị Thu Hương'}
+                </div>
               </div>
 
               <div>
                 <p className="font-bold text-slate-900 uppercase">Giám Đốc / Người Đại Diện</p>
                 <p className="text-[10px] text-slate-500 italic mt-0.5">(Ký tên, đóng dấu)</p>
-                <div className="h-16"></div>
-                <p className="font-bold text-slate-900">{settings.directorName || 'Nguyễn Văn Thành'}</p>
+                <div className="h-14 flex items-end justify-center font-bold text-slate-800">
+                  {settings.directorName || 'Nguyễn Văn Thành'}
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-
-      {/* Print stylesheet */}
-      <style>{`
-        @media print {
-          @page {
-            size: A4 landscape;
-            margin: 8mm 6mm;
-          }
-          body {
-            background-color: white !important;
-            print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
-          }
-          nav, aside, header, footer, button {
-            display: none !important;
-          }
-        }
-      `}</style>
     </div>
   );
 };

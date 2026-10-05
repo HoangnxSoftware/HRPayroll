@@ -42,6 +42,8 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
   { key: '{{muc_luong}}', label: 'Mức Lương Bằng Số', description: 'Mức lương cơ bản (VNĐ)', example: '15,000,000' },
   { key: '{{luong_bang_chu}}', label: 'Lương Bằng Chữ', description: 'Số tiền diễn giải bằng chữ', example: 'Mười lăm triệu đồng chẵn' },
   { key: '{{hinh_thuc_luong}}', label: 'Hình Thức Trả Lương', description: 'Lương tháng / Ngày / Giờ', example: 'Lương theo tháng qua chuyển khoản ngân hàng' },
+  { key: '{{muc_dong_bhxh}}', label: 'Mức Lương Đóng BHXH', description: 'Mức lương căn cứ đóng BHXH đối chiếu (VNĐ)', example: '10,000,000' },
+  { key: '{{luong_bhxh_bang_chu}}', label: 'Lương BHXH Bằng Chữ', description: 'Mức đóng BHXH diễn giải bằng chữ', example: 'Mười triệu đồng chẵn' },
   
   // Thời gian ký kết
   { key: '{{ngay_ky}}', label: 'Ngày Ký', description: 'Ngày ký kết văn bản (DD/MM/YYYY)', example: '24/09/2026' },
@@ -129,7 +131,7 @@ export function formatDateVN(dateStr?: string): string {
  * Theo Bộ luật Lao động 2019 (Luật số 45/2019/QH14)
  */
 export const DEFAULT_CONTRACT_TEMPLATE = `
-<div class="contract-document text-slate-900 font-serif leading-relaxed text-[13.5px]">
+<div style="font-family: Arial, Helvetica, sans-serif;" class="contract-document text-slate-900 font-sans leading-relaxed text-[13.5px]">
   <!-- Quốc hiệu Tiêu ngữ -->
   <div class="text-center mb-5">
     <p class="font-bold text-base tracking-wider uppercase">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</p>
@@ -201,7 +203,7 @@ export const DEFAULT_CONTRACT_TEMPLATE = `
       <p>3.1. <strong>Mức lương cơ bản: {{muc_luong}} VNĐ/tháng</strong> (Bằng chữ: <em>{{luong_bang_chu}}</em>).</p>
       <p>3.2. Hình thức trả lương: {{hinh_thuc_luong}} vào ngày thỏa thuận định kỳ hàng tháng.</p>
       <p>3.3. Phụ cấp và tiền thưởng: Được hưởng các chế độ phụ cấp ăn trưa, công tác phí, tiền làm thêm giờ và thưởng hiệu quả công việc theo quy chế tài chính và kết quả sản xuất kinh doanh của Công ty.</p>
-      <p>3.4. Chế độ bảo hiểm: Được tham gia Bảo hiểm xã hội (BHXH), Bảo hiểm y tế (BHYT) và Bảo hiểm thất nghiệp (BHTN) theo quy định của pháp luật hiện hành.</p>
+      <p>3.4. Chế độ bảo hiểm: Được tham gia Bảo hiểm xã hội (BHXH), Bảo hiểm y tế (BHYT) và Bảo hiểm thất nghiệp (BHTN) theo quy định của pháp luật hiện hành. Mức lương làm căn cứ đóng BHXH đối chiếu: <strong>{{muc_dong_bhxh}} VNĐ/tháng</strong> (Bằng chữ: <em>{{luong_bhxh_bang_chu}}</em>).</p>
       <p>3.5. Chế độ nghỉ ngơi: Được nghỉ các ngày lễ, tết, nghỉ phép năm hưởng nguyên lương theo quy định của Bộ luật Lao động.</p>
     </div>
 
@@ -241,7 +243,7 @@ export const DEFAULT_CONTRACT_TEMPLATE = `
  * Áp dụng cho cá nhân cam kết thu nhập chưa đến mức khấu trừ thuế TNCN
  */
 export const DEFAULT_COMMITMENT_TEMPLATE = `
-<div class="commitment-document text-slate-900 font-serif leading-relaxed text-[13.5px]">
+<div style="font-family: Arial, Helvetica, sans-serif;" class="commitment-document text-slate-900 font-sans leading-relaxed text-[13.5px]">
   <!-- Quốc hiệu Tiêu ngữ -->
   <div class="text-center mb-5">
     <p class="font-bold text-base tracking-wider uppercase">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</p>
@@ -325,6 +327,9 @@ export interface FillTemplateOptions {
   departmentName?: string;
   positionName?: string;
   representativeName?: string;
+  customBaseSalary?: number;
+  insuranceSalary?: number;
+  customStartDate?: string;
 }
 
 /**
@@ -347,12 +352,22 @@ export function fillDocumentTemplate(
       signYear = parts[0];
       signMonth = parts[1];
       signDay = parts[2];
+    } else if (parts.length === 2) {
+      signYear = parts[0];
+      signMonth = parts[1];
+      signDay = '01';
     }
   }
 
-  const baseSalary = employee.baseSalary || 0;
+  const baseSalary = options.customBaseSalary !== undefined ? options.customBaseSalary : (employee.baseSalary || 0);
   const formattedSalary = new Intl.NumberFormat('vi-VN').format(baseSalary);
   const salaryInWords = numberToWordsVietnamese(baseSalary);
+
+  const insSalary = options.insuranceSalary !== undefined 
+    ? options.insuranceSalary 
+    : baseSalary;
+  const formattedInsSalary = new Intl.NumberFormat('vi-VN').format(insSalary);
+  const insSalaryInWords = numberToWordsVietnamese(insSalary);
 
   const depName = options.departmentName || 
     settings.departments?.find(d => d.id === employee.departmentId)?.name || 'Bộ phận nghiệp vụ';
@@ -368,6 +383,10 @@ export function fillDocumentTemplate(
     (employee.workStatus === 'probation' 
       ? 'Hợp đồng lao động thử việc (02 tháng)' 
       : 'Hợp đồng lao động xác định thời hạn (12 tháng)');
+
+  const startDateFormatted = options.customStartDate 
+    ? formatDateVN(options.customStartDate)
+    : formatDateVN(employee.startDate);
 
   const replacements: Record<string, string> = {
     '{{ten_cong_ty}}': settings.companyName || 'CÔNG TY',
@@ -394,11 +413,13 @@ export function fillDocumentTemplate(
 
     '{{phong_ban}}': depName,
     '{{chuc_vu}}': posName,
-    '{{ngay_vao_lam}}': formatDateVN(employee.startDate),
+    '{{ngay_vao_lam}}': startDateFormatted,
     '{{loai_hop_dong}}': contractType,
     '{{muc_luong}}': formattedSalary,
     '{{luong_bang_chu}}': salaryInWords,
     '{{hinh_thuc_luong}}': salaryBasisLabel,
+    '{{muc_dong_bhxh}}': formattedInsSalary,
+    '{{luong_bhxh_bang_chu}}': insSalaryInWords,
 
     '{{ngay_ky}}': `${signDay}/${signMonth}/${signYear}`,
     '{{ngay_hien_tai}}': signDay,
@@ -433,24 +454,26 @@ const STORAGE_KEY_COMMITMENT = 'hr_salary_custom_commitment_template';
  */
 export function getSavedContractTemplate(settings?: SystemSettings): string {
   try {
+    let tpl: string | null = null;
     if (settings?.documentTemplates?.contractTemplate) {
-      let tpl = settings.documentTemplates.contractTemplate;
+      tpl = settings.documentTemplates.contractTemplate;
+    } else {
+      const saved = localStorage.getItem(STORAGE_KEY_CONTRACT);
+      if (saved && saved.trim()) {
+        tpl = saved;
+      }
+    }
+
+    if (tpl) {
       if (tpl.includes('Nam/Nữ - Việt Nam')) {
         tpl = tpl.replace(
           /•\s*Giới tính\s*\/\s*Quốc tịch\s*:\s*Nam\/Nữ\s*-\s*Việt Nam/gi,
           '• Giới tính: <strong>{{gioi_tinh}}</strong> &nbsp;&nbsp;|&nbsp;&nbsp; Quốc tịch: <strong>{{quoc_tich}}</strong>'
         );
       }
-      return tpl;
-    }
-    const saved = localStorage.getItem(STORAGE_KEY_CONTRACT);
-    if (saved && saved.trim()) {
-      let tpl = saved;
-      if (tpl.includes('Nam/Nữ - Việt Nam')) {
-        tpl = tpl.replace(
-          /•\s*Giới tính\s*\/\s*Quốc tịch\s*:\s*Nam\/Nữ\s*-\s*Việt Nam/gi,
-          '• Giới tính: <strong>{{gioi_tinh}}</strong> &nbsp;&nbsp;|&nbsp;&nbsp; Quốc tịch: <strong>{{quoc_tich}}</strong>'
-        );
+      tpl = tpl.replace(/font-serif/g, 'font-sans');
+      if (!tpl.includes('font-family')) {
+        tpl = tpl.replace(/class="contract-document/g, 'style="font-family: Arial, Helvetica, sans-serif;" class="contract-document');
       }
       return tpl;
     }
@@ -462,11 +485,23 @@ export function getSavedContractTemplate(settings?: SystemSettings): string {
 
 export function getSavedCommitmentTemplate(settings?: SystemSettings): string {
   try {
+    let tpl: string | null = null;
     if (settings?.documentTemplates?.commitmentTemplate) {
-      return settings.documentTemplates.commitmentTemplate;
+      tpl = settings.documentTemplates.commitmentTemplate;
+    } else {
+      const saved = localStorage.getItem(STORAGE_KEY_COMMITMENT);
+      if (saved && saved.trim()) {
+        tpl = saved;
+      }
     }
-    const saved = localStorage.getItem(STORAGE_KEY_COMMITMENT);
-    if (saved && saved.trim()) return saved;
+
+    if (tpl) {
+      tpl = tpl.replace(/font-serif/g, 'font-sans');
+      if (!tpl.includes('font-family')) {
+        tpl = tpl.replace(/class="commitment-document/g, 'style="font-family: Arial, Helvetica, sans-serif;" class="commitment-document');
+      }
+      return tpl;
+    }
   } catch (e) {
     console.warn('Lỗi đọc mẫu cam kết:', e);
   }

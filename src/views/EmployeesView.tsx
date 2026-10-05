@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   Users, 
   UserPlus, 
@@ -25,7 +25,7 @@ import {
   Save,
   TrendingUp
 } from 'lucide-react';
-import { Employee, Department, Position, SystemSettings, WorkHistoryItem, WorkStatus, SalaryCalculationBasis } from '../types';
+import { Employee, Department, Position, SystemSettings, WorkHistoryItem, WorkStatus, SalaryCalculationBasis, InsuranceRecord } from '../types';
 import { formatVND, getEmployeeWorkStatusDetails, syncEmployeeWorkHistory } from '../utils/payrollCalculator';
 import { exportEmployeesToExcel, downloadEmployeeTemplate, readEmployeeExcel } from '../utils/excelHelper';
 import { useAuthRole } from '../context/AuthRoleContext';
@@ -37,6 +37,7 @@ interface EmployeesViewProps {
   departments: Department[];
   positions: Position[];
   settings?: SystemSettings;
+  insurances?: InsuranceRecord[];
   onAddEmployee: () => void;
   onEditEmployee: (employee: Employee) => void;
   onDeleteEmployee: (id: string) => void;
@@ -51,6 +52,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   departments,
   positions,
   settings,
+  insurances,
   onAddEmployee,
   onEditEmployee,
   onDeleteEmployee,
@@ -74,6 +76,10 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   const [batchModalSelectedIds, setBatchModalSelectedIds] = useState<string[]>([]);
   const [batchModalInitialDocType, setBatchModalInitialDocType] = useState<DocumentType>('contract');
   const [selectedEmpIds, setSelectedEmpIds] = useState<Set<string>>(new Set());
+  const [periodContractOverride, setPeriodContractOverride] = useState<{
+    item: WorkHistoryItem;
+    matchedInsSalary: number;
+  } | null>(null);
 
   // Chỉnh sửa nhanh mức lương đến hàng đơn vị (vd: 525.454 hoặc 525454)
   const [editingSalaryEmpId, setEditingSalaryEmpId] = useState<string | null>(null);
@@ -165,6 +171,26 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
     note: ''
   });
   const [workHistorySuccessMsg, setWorkHistorySuccessMsg] = useState<string | null>(null);
+  const [deleteWorkHistoryModal, setDeleteWorkHistoryModal] = useState<{
+    isOpen: boolean;
+    itemId: string | null;
+    itemIndex: number | null;
+    periodLabel: string;
+  }>({
+    isOpen: false,
+    itemId: null,
+    itemIndex: null,
+    periodLabel: ''
+  });
+
+  useEffect(() => {
+    if (workHistoryTarget) {
+      const fresh = employees.find(e => e.id === workHistoryTarget.id);
+      if (fresh && fresh !== workHistoryTarget) {
+        setWorkHistoryTarget(fresh);
+      }
+    }
+  }, [employees]);
 
   const targetHistory: WorkHistoryItem[] = useMemo(() => {
     if (!workHistoryTarget) return [];
@@ -298,11 +324,27 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
     setTimeout(() => setWorkHistorySuccessMsg(null), 3000);
   };
 
-  const handleDeleteWorkHistoryItem = (itemId: string) => {
-    if (!workHistoryTarget) return;
-    if (!confirm('Bạn có chắc chắn muốn xóa giai đoạn công tác này?')) return;
+  const handleRequestDeleteWorkHistoryItem = (item: WorkHistoryItem, index: number) => {
+    setDeleteWorkHistoryModal({
+      isOpen: true,
+      itemId: item.id || `wh-${index}`,
+      itemIndex: index,
+      periodLabel: `${item.fromMonth} → ${item.toMonth || 'Đến nay'} (${posMap.get(item.positionId) || item.positionId})`
+    });
+  };
 
-    const updatedHistory = (workHistoryTarget.workHistory || []).filter(h => h.id !== itemId);
+  const confirmDeleteWorkHistoryItem = () => {
+    if (!workHistoryTarget) return;
+    const { itemId, itemIndex } = deleteWorkHistoryModal;
+    if (!itemId && itemIndex === null) return;
+
+    const currentHistory = workHistoryTarget.workHistory ? [...workHistoryTarget.workHistory] : [];
+    const updatedHistory = currentHistory.filter((h, idx) => {
+      if (itemId && h.id) return h.id !== itemId;
+      if (itemIndex !== null) return idx !== itemIndex;
+      return true;
+    });
+
     const updatedEmp: Employee = {
       ...workHistoryTarget,
       workHistory: updatedHistory
@@ -313,8 +355,37 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
       onUpdateEmployee(updatedEmp);
     }
 
-    setWorkHistorySuccessMsg('Đã xóa giai đoạn thành công!');
+    setDeleteWorkHistoryModal({ isOpen: false, itemId: null, itemIndex: null, periodLabel: '' });
+    setWorkHistorySuccessMsg('Đã xóa giai đoạn quá trình làm việc thành công!');
     setTimeout(() => setWorkHistorySuccessMsg(null), 3000);
+  };
+
+  // In Hợp đồng lao động theo từng giai đoạn & đối chiếu mức đóng BHXH
+  const handlePrintContractForPeriod = (item: WorkHistoryItem) => {
+    if (!workHistoryTarget) return;
+    // Đối chiếu mức đóng BHXH trong Quá trình & Mức đóng BHXH
+    const matchingIns = insurances?.find(i => i.employeeId === workHistoryTarget.id);
+    let matchedInsSalary = matchingIns?.insuranceSalary || item.baseSalary;
+    if (matchingIns?.history && matchingIns.history.length > 0) {
+      const periodMonth = item.fromMonth.slice(0, 7);
+      const foundHist = matchingIns.history.find(h => {
+        if (h.fromMonth <= periodMonth) {
+          if (!h.toMonth || h.toMonth >= periodMonth) return true;
+        }
+        return false;
+      }) || matchingIns.history[matchingIns.history.length - 1];
+      if (foundHist) {
+        matchedInsSalary = foundHist.salary;
+      }
+    }
+
+    setPeriodContractOverride({
+      item,
+      matchedInsSalary
+    });
+    setBatchModalSelectedIds([workHistoryTarget.id]);
+    setBatchModalInitialDocType('contract');
+    setIsBatchContractsModalOpen(true);
   };
 
   const filteredEmployees = employees.filter(emp => {
@@ -907,7 +978,10 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
       {settings && (
         <PrintBatchContractsModal
           isOpen={isBatchContractsModalOpen}
-          onClose={() => setIsBatchContractsModalOpen(false)}
+          onClose={() => {
+            setIsBatchContractsModalOpen(false);
+            setPeriodContractOverride(null);
+          }}
           employees={employees}
           departments={departments}
           positions={positions}
@@ -915,6 +989,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           onUpdateSettings={onUpdateSettings}
           initialSelectedEmployeeIds={batchModalSelectedIds}
           initialDocType={batchModalInitialDocType}
+          periodOverride={periodContractOverride}
         />
       )}
 
@@ -1078,16 +1153,33 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                                   <div className="flex items-center justify-end gap-1">
                                     <button
                                       type="button"
-                                      onClick={() => handleEditWorkHistoryItem(item)}
-                                      className="p-1 text-blue-600 hover:bg-blue-50 rounded cursor-pointer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handlePrintContractForPeriod(item);
+                                      }}
+                                      className="p-1.5 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg cursor-pointer transition-colors"
+                                      title="In Hợp đồng lao động theo giai đoạn này (Đối chiếu mức đóng BHXH)"
+                                    >
+                                      <Printer className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEditWorkHistoryItem(item);
+                                      }}
+                                      className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"
                                       title="Sửa giai đoạn này"
                                     >
                                       <Edit3 className="w-3.5 h-3.5" />
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => handleDeleteWorkHistoryItem(item.id)}
-                                      className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRequestDeleteWorkHistoryItem(item, idx);
+                                      }}
+                                      className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
                                       title="Xóa giai đoạn này"
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
@@ -1369,6 +1461,45 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                 className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-colors cursor-pointer"
               >
                 Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Dialog: Xóa Giai Đoạn Quá Trình Làm Việc */}
+      {deleteWorkHistoryModal.isOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-rose-100 text-rose-600 rounded-xl">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm">Xác Nhận Xóa Giai Đoạn Công Tác</h4>
+                <p className="text-xs text-slate-500">Thao tác này sẽ loại bỏ giai đoạn khỏi quá trình làm việc</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 text-xs text-slate-700">
+              Bạn có chắc chắn muốn xóa giai đoạn: <strong className="text-slate-900 font-semibold">{deleteWorkHistoryModal.periodLabel}</strong> không?
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setDeleteWorkHistoryModal({ isOpen: false, itemId: null, itemIndex: null, periodLabel: '' })}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteWorkHistoryItem}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác Nhận Xóa</span>
               </button>
             </div>
           </div>

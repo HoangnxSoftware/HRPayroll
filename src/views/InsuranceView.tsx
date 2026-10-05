@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   ShieldCheck, 
   Download, 
@@ -100,6 +100,30 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
     note: ''
   });
   const [historySuccessMsg, setHistorySuccessMsg] = useState<string | null>(null);
+  const [deleteHistoryModal, setDeleteHistoryModal] = useState<{
+    isOpen: boolean;
+    itemId: string | null;
+    itemIndex: number | null;
+    periodLabel: string;
+  }>({
+    isOpen: false,
+    itemId: null,
+    itemIndex: null,
+    periodLabel: ''
+  });
+
+  useEffect(() => {
+    if (historyTarget) {
+      const freshIns = insurances.find(i => i.id === historyTarget.insurance.id);
+      const freshEmp = employees.find(e => e.id === historyTarget.employee.id);
+      if (freshIns && (freshIns !== historyTarget.insurance || freshEmp !== historyTarget.employee)) {
+        setHistoryTarget({
+          employee: freshEmp || historyTarget.employee,
+          insurance: freshIns
+        });
+      }
+    }
+  }, [insurances, employees]);
 
   // Modal chỉnh sửa tỷ lệ đóng toàn công ty
   const [isRateModalOpen, setIsRateModalOpen] = useState(false);
@@ -464,11 +488,27 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
     setTimeout(() => setHistorySuccessMsg(null), 3000);
   };
 
-  const handleDeleteHistoryItem = (historyId: string) => {
-    if (!historyTarget) return;
-    if (!confirm('Bạn có chắc muốn xóa thời kỳ đóng BHXH này?')) return;
+  const handleRequestDeleteHistoryItem = (item: InsuranceSalaryHistory, index: number) => {
+    setDeleteHistoryModal({
+      isOpen: true,
+      itemId: item.id || `ih-${index}`,
+      itemIndex: index,
+      periodLabel: `${item.fromMonth} → ${item.toMonth || 'Đến nay'} (${formatVND(item.salary)})`
+    });
+  };
 
-    const updatedHistory = (historyTarget.insurance.history || []).filter(h => h.id !== historyId);
+  const confirmDeleteHistoryItem = () => {
+    if (!historyTarget) return;
+    const { itemId, itemIndex } = deleteHistoryModal;
+    if (!itemId && itemIndex === null) return;
+
+    const currentHistory = historyTarget.insurance.history ? [...historyTarget.insurance.history] : [];
+    const updatedHistory = currentHistory.filter((h, idx) => {
+      if (itemId && h.id) return h.id !== itemId;
+      if (itemIndex !== null) return idx !== itemIndex;
+      return true;
+    });
+
     const updatedIns: InsuranceRecord = {
       ...historyTarget.insurance,
       history: updatedHistory
@@ -479,7 +519,8 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
       ...historyTarget,
       insurance: updatedIns
     });
-    setHistorySuccessMsg('Đã xóa giai đoạn đóng BHXH!');
+    setDeleteHistoryModal({ isOpen: false, itemId: null, itemIndex: null, periodLabel: '' });
+    setHistorySuccessMsg('Đã xóa giai đoạn đóng BHXH thành công!');
     setTimeout(() => setHistorySuccessMsg(null), 3000);
   };
 
@@ -1637,8 +1678,11 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => handleDeleteHistoryItem(item.id)}
-                                      className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRequestDeleteHistoryItem(item, idx);
+                                      }}
+                                      className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
                                       title="Xóa giai đoạn này"
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
@@ -2074,6 +2118,45 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
         year={selectedYear}
         settings={settings}
       />
+
+      {/* Confirmation Dialog: Xóa Giai Đoạn Đóng BHXH */}
+      {deleteHistoryModal.isOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-rose-100 text-rose-600 rounded-xl">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm">Xác Nhận Xóa Giai Đoạn Đóng BHXH</h4>
+                <p className="text-xs text-slate-500">Thao tác này sẽ loại bỏ mốc mức đóng khỏi lịch sử BHXH</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 text-xs text-slate-700">
+              Bạn có chắc chắn muốn xóa giai đoạn mức đóng: <strong className="text-slate-900 font-semibold">{deleteHistoryModal.periodLabel}</strong> không?
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setDeleteHistoryModal({ isOpen: false, itemId: null, itemIndex: null, periodLabel: '' })}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteHistoryItem}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xác Nhận Xóa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

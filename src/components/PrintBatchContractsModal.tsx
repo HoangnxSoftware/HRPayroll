@@ -18,7 +18,7 @@ import {
   Sparkles,
   Info
 } from 'lucide-react';
-import { Employee, Department, Position, SystemSettings } from '../types';
+import { Employee, Department, Position, SystemSettings, WorkHistoryItem } from '../types';
 import { 
   TEMPLATE_VARIABLES, 
   fillDocumentTemplate, 
@@ -32,6 +32,11 @@ import {
 
 export type DocumentType = 'contract' | 'commitment' | 'both';
 
+export interface PeriodContractOverride {
+  item: WorkHistoryItem;
+  matchedInsSalary: number;
+}
+
 interface PrintBatchContractsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -42,6 +47,7 @@ interface PrintBatchContractsModalProps {
   onUpdateSettings?: (newSettings: SystemSettings) => void;
   initialSelectedEmployeeIds?: string[];
   initialDocType?: DocumentType;
+  periodOverride?: PeriodContractOverride | null;
 }
 
 export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> = ({
@@ -54,6 +60,7 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
   onUpdateSettings,
   initialSelectedEmployeeIds,
   initialDocType = 'contract',
+  periodOverride = null,
 }) => {
   if (!isOpen) return null;
 
@@ -568,14 +575,26 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
 
                   {/* Render each employee's document page(s) */}
                   {selectedEmployees.map((emp, empIdx) => {
-                    const depName = depMap.get(emp.departmentId);
-                    const posName = posMap.get(emp.positionId);
+                    const isPeriod = Boolean(periodOverride && selectedEmployees.length === 1);
+                    const targetDepId = isPeriod ? periodOverride!.item.departmentId : emp.departmentId;
+                    const targetPosId = isPeriod ? periodOverride!.item.positionId : emp.positionId;
+                    const depName = depMap.get(targetDepId) || 'Bộ phận chuyên môn';
+                    const posName = posMap.get(targetPosId) || 'Nhân viên';
+                    const resolvedContractType = isPeriod 
+                      ? (periodOverride!.item.workStatus === 'probation' 
+                          ? 'Hợp đồng lao động thử việc (02 tháng)'
+                          : 'Hợp đồng lao động xác định thời hạn')
+                      : contractType;
+
                     const fillOptions = {
-                      contractType,
-                      signDate,
+                      contractType: resolvedContractType,
+                      signDate: isPeriod ? (periodOverride!.item.fromMonth.length === 7 ? `${periodOverride!.item.fromMonth}-01` : periodOverride!.item.fromMonth) : signDate,
                       departmentName: depName,
                       positionName: posName,
-                      representativeName
+                      representativeName,
+                      customBaseSalary: isPeriod ? periodOverride!.item.baseSalary : undefined,
+                      insuranceSalary: isPeriod ? periodOverride!.matchedInsSalary : undefined,
+                      customStartDate: isPeriod ? periodOverride!.item.fromMonth : undefined,
                     };
 
                     const renderContract = docType === 'contract' || docType === 'both';
@@ -589,9 +608,14 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
                             <div className="print:hidden flex items-center justify-between border-b pb-2 mb-4 text-xs text-slate-400">
                               <span className="font-mono font-bold text-slate-600">
                                 #{empIdx + 1} - HỢP ĐỒNG LAO ĐỘNG: {emp.fullName} ({emp.employeeCode})
+                                {isPeriod && (
+                                  <span className="ml-2 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-sans">
+                                    Giai đoạn: {periodOverride!.item.fromMonth} → {periodOverride!.item.toMonth || 'Đến nay'} • Mức đóng BHXH đối chiếu: {new Intl.NumberFormat('vi-VN').format(periodOverride!.matchedInsSalary)} đ
+                                  </span>
+                                )}
                               </span>
                               <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px]">
-                                Khổ A4 Dọc
+                                Khổ A4 Dọc • Font Arial
                               </span>
                             </div>
 
@@ -818,6 +842,7 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
             break-after: avoid;
           }
           .contract-document, .commitment-document {
+            font-family: Arial, Helvetica, sans-serif !important;
             font-size: 13pt !important;
             line-height: 1.6 !important;
             color: black !important;

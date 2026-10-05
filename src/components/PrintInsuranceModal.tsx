@@ -1,7 +1,8 @@
 import React from 'react';
-import { Printer, X, ShieldCheck } from 'lucide-react';
+import { Printer, X, ShieldCheck, Download } from 'lucide-react';
 import { Employee, InsuranceRecord, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
+import * as XLSX from 'xlsx';
 
 interface PrintInsuranceModalProps {
   isOpen: boolean;
@@ -115,6 +116,100 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
     window.print();
   };
 
+  const handleExportExcel = () => {
+    const excelRows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      [`BẢNG TỔNG HỢP TRÍCH NỘP BẢO HIỂM XÃ HỘI, BHYT, BHTN & KINH PHÍ CÔNG ĐOÀN`],
+      [`Tháng ${settings.currentMonth} năm ${settings.currentYear}`],
+      [],
+      [
+        'STT',
+        'Mã NV',
+        'Số CCCD',
+        'Họ và Tên',
+        'Phòng Ban',
+        'Lương Đóng BHXH',
+        'BHXH NLĐ (8%)',
+        'BHYT NLĐ (1.5%)',
+        'BHTN NLĐ (1%)',
+        'Tổng NLĐ Đóng',
+        'BHXH DN (17.5%)',
+        'BHYT DN (3%)',
+        'BHTN DN (1%)',
+        'KPCĐ (2%)',
+        'Tổng DN Đóng',
+        'Tổng Số Tiền Trích Nộp'
+      ],
+      ...dataRows.map((r, idx) => [
+        idx + 1,
+        r.emp?.employeeCode || '',
+        r.emp?.idCardNumber || '',
+        r.emp?.fullName || '',
+        depMap.get(r.emp?.departmentId || '') || '',
+        r.salary,
+        r.empSoc,
+        r.empMed,
+        r.empUnemp,
+        r.empTotal,
+        r.erSoc,
+        r.erMed,
+        r.erUnemp,
+        r.erUnion,
+        r.erTotal,
+        r.totalContribution
+      ]),
+      [
+        'TỔNG CỘNG',
+        '',
+        '',
+        '',
+        '',
+        grandSalary,
+        grandEmpSoc,
+        grandEmpMed,
+        grandEmpUnemp,
+        grandEmpTotal,
+        grandErSoc,
+        grandErMed,
+        grandErUnemp,
+        grandErUnion,
+        grandErTotal,
+        grandTotal
+      ],
+      [],
+      [],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', '', '', '', 'GIÁM ĐỐC DOANH NGHIỆP'],
+      ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '', '', '', '', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
+      [],
+      [],
+      [
+        settings.reportPreparerName || 'Phạm Hồng Phúc',
+        '',
+        '',
+        settings.chiefAccountantName || 'Trần Thị Thu Hương',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        settings.directorName || 'Nguyễn Văn Thành'
+      ]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(excelRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Trich_Nop_BHXH');
+    XLSX.writeFile(wb, `Trich_Nop_BHXH_T${settings.currentMonth}_${settings.currentYear}.xlsx`);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[96vh] flex flex-col overflow-hidden">
@@ -136,6 +231,13 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
             >
               <Printer className="w-4 h-4" />
               <span>In Ngay / Lưu PDF</span>
+            </button>
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-sm font-semibold shadow-xs cursor-pointer transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              <span>Kết Xuất Excel</span>
             </button>
             <button
               onClick={onClose}
@@ -186,9 +288,6 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
               <div className="text-right">
                 <div className="text-xs font-semibold text-slate-800">
                   Kỳ trích nộp: Tháng {settings.currentMonth}/{settings.currentYear}
-                </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  Ngày in: {new Date().toLocaleDateString('vi-VN')}
                 </div>
                 <div className="text-[10px] text-emerald-800 font-bold mt-0.5">
                   Tỷ lệ chuẩn: NLĐ {totalRateEmp}% • Doanh nghiệp {totalRateEr}%
