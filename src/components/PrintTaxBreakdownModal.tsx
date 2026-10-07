@@ -124,7 +124,7 @@ export const PrintTaxBreakdownModal: React.FC<PrintTaxBreakdownModalProps> = ({
       ],
       [],
       [],
-      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', 'GIÁM ĐỐC DOANH NGHIỆP'],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', 'NGƯỜI ĐẠI DIỆN PHÁP LUẬT'],
       ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
       [],
       [],
@@ -151,8 +151,8 @@ export const PrintTaxBreakdownModal: React.FC<PrintTaxBreakdownModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto print:p-0 print:bg-white">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[96vw] max-h-[96vh] flex flex-col overflow-hidden print:border-none print:shadow-none print:max-h-none print:max-w-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto print:p-0 print:m-0 print:bg-white print:static print:overflow-visible print:block print:h-auto print:max-h-none print:w-full print:inset-auto">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[96vw] max-h-[96vh] flex flex-col overflow-hidden print:border-none print:shadow-none print:rounded-none print:p-0 print:m-0 print:static print:overflow-visible print:block print:h-auto print:max-h-none print:w-full">
         {/* Top Control Bar (Hidden when printing) */}
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between print:hidden shrink-0">
           <div className="flex items-center gap-2.5">
@@ -189,24 +189,31 @@ export const PrintTaxBreakdownModal: React.FC<PrintTaxBreakdownModalProps> = ({
         </div>
 
         {/* Printable Paper Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-100 print:bg-white print:p-0">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-100 print:bg-white print:p-0 print:m-0 print:overflow-visible print:block print:h-auto print:max-h-none">
           <style dangerouslySetInnerHTML={{ __html: `
             @media print {
               @page {
                 size: A4 landscape;
                 margin: 6mm 4mm;
               }
-              body {
-                visibility: hidden;
+              html, body {
+                overflow: visible !important;
+                height: auto !important;
+                min-height: 100% !important;
                 background: white !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+              body * {
+                visibility: hidden;
               }
               #tax-breakdown-print-sheet, #tax-breakdown-print-sheet * {
                 visibility: visible;
               }
               #tax-breakdown-print-sheet {
-                position: absolute;
-                left: 0;
-                top: 0;
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
                 width: 100% !important;
                 max-width: 100% !important;
                 display: block !important;
@@ -215,6 +222,7 @@ export const PrintTaxBreakdownModal: React.FC<PrintTaxBreakdownModalProps> = ({
                 border: none !important;
                 box-shadow: none !important;
                 background: white !important;
+                overflow: visible !important;
               }
               table {
                 font-size: 6.8pt !important;
@@ -238,7 +246,7 @@ export const PrintTaxBreakdownModal: React.FC<PrintTaxBreakdownModalProps> = ({
             }
           `}} />
 
-          <div id="tax-breakdown-print-sheet" className="bg-white mx-auto p-6 sm:p-8 rounded-xl shadow-xs print:shadow-none print:p-0 max-w-[1400px] print:max-w-none print:w-full border border-slate-200 print:border-none text-slate-900 print:text-[8.5px]">
+          <div id="tax-breakdown-print-sheet" className="bg-white mx-auto p-6 sm:p-8 rounded-xl shadow-xs print:shadow-none print:p-0 print:m-0 max-w-[1400px] print:max-w-none print:w-full border border-slate-200 print:border-none text-slate-900 print:text-[8.5px]">
             {/* Enterprise Header */}
             <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
               <div>
@@ -387,7 +395,7 @@ export const PrintTaxBreakdownModal: React.FC<PrintTaxBreakdownModalProps> = ({
                 <p className="font-bold text-slate-800">{settings.chiefAccountantName || 'Trần Thị Thu Hương'}</p>
               </div>
               <div>
-                <p className="font-bold uppercase text-slate-900">Giám Đốc Doanh Nghiệp</p>
+                <p className="font-bold uppercase text-slate-900">Người đại diện pháp luật</p>
                 <p className="text-[10px] text-slate-500 italic mt-0.5">(Ký, đóng dấu, ghi rõ họ tên)</p>
                 <div className="h-16"></div>
                 <p className="font-bold text-slate-800">{settings.directorName || 'Nguyễn Văn Thành'}</p>

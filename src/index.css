@@ -1,1 +1,7 @@
 @import "tailwindcss";
+
+.contract-document,
+.commitment-document,
+.contract-print-page {
+  font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif !important;
+}

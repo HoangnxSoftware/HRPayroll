@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   FileText, 
   Printer, 
@@ -180,6 +181,80 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
 
     return periodOverride || null;
   }, [selectedEmployees, selectedPeriodId, periodOverride, insurances]);
+
+  // Danh sách các trang văn bản chuẩn bị cho cả Preview trên màn hình và Dedicated Print Portal
+  const printDocuments = useMemo(() => {
+    const items: Array<{
+      key: string;
+      docType: 'contract' | 'commitment';
+      employee: Employee;
+      empIndex: number;
+      title: string;
+      html: string;
+      isPeriod: boolean;
+      periodInfo?: { fromMonth: string; toMonth?: string; matchedInsSalary: number };
+    }> = [];
+
+    const activeOverride = effectivePeriodOverride || periodOverride;
+    const isSingle = selectedEmployees.length === 1;
+
+    selectedEmployees.forEach((emp, empIdx) => {
+      const isPeriod = Boolean(activeOverride && isSingle);
+      const targetDepId = isPeriod ? activeOverride!.item.departmentId : emp.departmentId;
+      const targetPosId = isPeriod ? activeOverride!.item.positionId : emp.positionId;
+      const depName = depMap.get(targetDepId) || 'Bộ phận chuyên môn';
+      const posName = posMap.get(targetPosId) || 'Nhân viên';
+      const resolvedContractType = isPeriod 
+        ? (activeOverride!.item.workStatus === 'probation' 
+            ? 'Hợp đồng lao động thử việc (02 tháng)' 
+            : 'Hợp đồng lao động xác định thời hạn')
+        : contractType;
+
+      const fillOptions = {
+        contractType: resolvedContractType,
+        signDate: isPeriod 
+          ? (activeOverride!.item.fromMonth.length === 7 ? `${activeOverride!.item.fromMonth}-01` : activeOverride!.item.fromMonth) 
+          : signDate,
+        departmentName: depName,
+        positionName: posName,
+        representativeName,
+        customBaseSalary: isPeriod ? activeOverride!.item.baseSalary : undefined,
+        insuranceSalary: isPeriod ? activeOverride!.matchedInsSalary : undefined,
+        customStartDate: isPeriod ? activeOverride!.item.fromMonth : undefined,
+      };
+
+      if (docType === 'contract' || docType === 'both') {
+        items.push({
+          key: `contract-${emp.id}-${empIdx}`,
+          docType: 'contract',
+          employee: emp,
+          empIndex: empIdx,
+          title: `HỢP ĐỒNG LAO ĐỘNG: ${emp.fullName} (${emp.employeeCode})`,
+          html: fillDocumentTemplate(contractTemplate, emp, settings, fillOptions),
+          isPeriod,
+          periodInfo: isPeriod ? {
+            fromMonth: activeOverride!.item.fromMonth,
+            toMonth: activeOverride!.item.toMonth,
+            matchedInsSalary: activeOverride!.matchedInsSalary
+          } : undefined
+        });
+      }
+
+      if (docType === 'commitment' || docType === 'both') {
+        items.push({
+          key: `commitment-${emp.id}-${empIdx}`,
+          docType: 'commitment',
+          employee: emp,
+          empIndex: empIdx,
+          title: `CAM KẾT THU NHẬP (MẪU 08/CK-TNCN): ${emp.fullName} (${emp.employeeCode})`,
+          html: fillDocumentTemplate(commitmentTemplate, emp, settings, fillOptions),
+          isPeriod: false
+        });
+      }
+    });
+
+    return items;
+  }, [selectedEmployees, docType, effectivePeriodOverride, periodOverride, depMap, posMap, contractType, signDate, representativeName, contractTemplate, commitmentTemplate, settings]);
 
   // Toggle selection
   const toggleEmployee = (id: string) => {
@@ -406,8 +481,8 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
   const sampleEmployee = employees[previewEmployeeIndex] || employees[0];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] xl:max-w-7xl h-[95vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto print:p-0 print:m-0 print:bg-white print:static print:overflow-visible print:block print:h-auto print:max-h-none print:w-full print:inset-auto">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] xl:max-w-7xl h-[95vh] flex flex-col overflow-hidden print:border-none print:shadow-none print:rounded-none print:p-0 print:m-0 print:static print:overflow-visible print:block print:h-auto print:max-h-none print:w-full">
         
         {/* Top Control Bar (Hidden on Print) */}
         <div className="px-5 py-3.5 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3 shrink-0 print:hidden">
@@ -491,7 +566,7 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
 
         {/* TAB 1: IN HÀNG LOẠT (SELECTION & PRINT PREVIEW) */}
         {activeTab === 'print' && (
-          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden print:overflow-visible print:block print:h-auto print:max-h-none print:p-0 print:m-0">
             {/* Left Sidebar: Controls & Employee Batch Selector (Hidden on print) */}
             <div className="w-full lg:w-96 bg-slate-50 border-r border-slate-200 flex flex-col shrink-0 overflow-y-auto print:hidden p-4 space-y-4">
               
@@ -752,7 +827,7 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
             </div>
 
             {/* Right Area: Document Live Preview & Print Paper */}
-            <div className="flex-1 bg-slate-200/90 overflow-y-auto p-4 sm:p-6 print:p-0 print:bg-white flex flex-col items-center">
+            <div className="flex-1 bg-slate-200/90 overflow-y-auto p-4 sm:p-6 print:p-0 print:m-0 print:bg-white print:overflow-visible print:block print:h-auto print:max-h-none flex flex-col items-center">
               
               {selectedEmployees.length === 0 ? (
                 <div className="my-auto text-center p-8 bg-white rounded-2xl border border-slate-300 shadow-md max-w-md">
@@ -769,14 +844,14 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
                   </button>
                 </div>
               ) : (
-                <div id="contracts-batch-print-area" className="w-full max-w-[210mm] space-y-8 print:space-y-0 print:max-w-none">
+                <div id="contracts-batch-preview-area" className="w-full max-w-[210mm] space-y-8" style={{ fontFamily: "Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif" }}>
                   
-                  {/* Notice banner on preview mode (hidden in print) */}
-                  <div className="print:hidden p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs flex items-center justify-between shadow-2xs">
+                  {/* Notice banner on preview mode */}
+                  <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs flex items-center justify-between shadow-2xs">
                     <div className="flex items-center gap-2">
                       <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
                       <span>
-                        Đang hiển thị bản xem trước in cho <strong>{selectedEmployees.length}</strong> nhân viên (Khổ A4 chuẩn). Nhấp <strong>In Ngay</strong> để xuất tài liệu hoặc lưu PDF.
+                        Đang hiển thị bản xem trước cho <strong>{selectedEmployees.length}</strong> nhân sự ({printDocuments.length} văn bản • Khổ A4 chuẩn • Font Calibri). Nhấp <strong>In Ngay / Lưu PDF</strong> để xuất tài liệu.
                       </span>
                     </div>
                     <button
@@ -788,82 +863,35 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
                     </button>
                   </div>
 
-                  {/* Render each employee's document page(s) */}
-                  {selectedEmployees.map((emp, empIdx) => {
-                    const isPeriod = Boolean(periodOverride && selectedEmployees.length === 1);
-                    const targetDepId = isPeriod ? periodOverride!.item.departmentId : emp.departmentId;
-                    const targetPosId = isPeriod ? periodOverride!.item.positionId : emp.positionId;
-                    const depName = depMap.get(targetDepId) || 'Bộ phận chuyên môn';
-                    const posName = posMap.get(targetPosId) || 'Nhân viên';
-                    const resolvedContractType = isPeriod 
-                      ? (periodOverride!.item.workStatus === 'probation' 
-                          ? 'Hợp đồng lao động thử việc (02 tháng)'
-                          : 'Hợp đồng lao động xác định thời hạn')
-                      : contractType;
+                  {/* Render each employee's document page(s) for live preview */}
+                  {printDocuments.map((doc) => (
+                    <div 
+                      key={doc.key}
+                      className="bg-white shadow-xl rounded-xl sm:rounded-2xl p-8 sm:p-12 border border-slate-300" 
+                      style={{ fontFamily: "Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif" }}
+                    >
+                      <div className="flex items-center justify-between border-b pb-2 mb-4 text-xs text-slate-400">
+                        <span className="font-mono font-bold text-slate-600">
+                          #{doc.empIndex + 1} - {doc.title}
+                          {doc.isPeriod && doc.periodInfo && (
+                            <span className="ml-2 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-sans">
+                              Giai đoạn: {doc.periodInfo.fromMonth} → {doc.periodInfo.toMonth || 'Đến nay'} • Mức đóng BHXH đối chiếu: {new Intl.NumberFormat('vi-VN').format(doc.periodInfo.matchedInsSalary)} đ
+                            </span>
+                          )}
+                        </span>
+                        <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-medium text-slate-700">
+                          Khổ A4 Dọc • Font Calibri
+                        </span>
+                      </div>
 
-                    const fillOptions = {
-                      contractType: resolvedContractType,
-                      signDate: isPeriod ? (periodOverride!.item.fromMonth.length === 7 ? `${periodOverride!.item.fromMonth}-01` : periodOverride!.item.fromMonth) : signDate,
-                      departmentName: depName,
-                      positionName: posName,
-                      representativeName,
-                      customBaseSalary: isPeriod ? periodOverride!.item.baseSalary : undefined,
-                      insuranceSalary: isPeriod ? periodOverride!.matchedInsSalary : undefined,
-                      customStartDate: isPeriod ? periodOverride!.item.fromMonth : undefined,
-                    };
-
-                    const renderContract = docType === 'contract' || docType === 'both';
-                    const renderCommitment = docType === 'commitment' || docType === 'both';
-
-                    return (
-                      <React.Fragment key={emp.id}>
-                        {/* HỢP ĐỒNG LAO ĐỘNG PAGE */}
-                        {renderContract && (
-                          <div className="contract-print-page bg-white shadow-xl rounded-xl sm:rounded-2xl p-8 sm:p-12 border border-slate-300 print:shadow-none print:border-none print:p-0 print:m-0 print:rounded-none">
-                            <div className="print:hidden flex items-center justify-between border-b pb-2 mb-4 text-xs text-slate-400">
-                              <span className="font-mono font-bold text-slate-600">
-                                #{empIdx + 1} - HỢP ĐỒNG LAO ĐỘNG: {emp.fullName} ({emp.employeeCode})
-                                {isPeriod && (
-                                  <span className="ml-2 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-sans">
-                                    Giai đoạn: {periodOverride!.item.fromMonth} → {periodOverride!.item.toMonth || 'Đến nay'} • Mức đóng BHXH đối chiếu: {new Intl.NumberFormat('vi-VN').format(periodOverride!.matchedInsSalary)} đ
-                                  </span>
-                                )}
-                              </span>
-                              <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px]">
-                                Khổ A4 Dọc • Font Arial
-                              </span>
-                            </div>
-
-                            <div 
-                              dangerouslySetInnerHTML={{ 
-                                __html: fillDocumentTemplate(contractTemplate, emp, settings, fillOptions) 
-                              }} 
-                            />
-                          </div>
-                        )}
-
-                        {/* BẢN CAM KẾT THU NHẬP PAGE */}
-                        {renderCommitment && (
-                          <div className="contract-print-page bg-white shadow-xl rounded-xl sm:rounded-2xl p-8 sm:p-12 border border-slate-300 print:shadow-none print:border-none print:p-0 print:m-0 print:rounded-none">
-                            <div className="print:hidden flex items-center justify-between border-b pb-2 mb-4 text-xs text-slate-400">
-                              <span className="font-mono font-bold text-slate-600">
-                                #{empIdx + 1} - CAM KẾT THU NHẬP (MẪU 08/CK-TNCN): {emp.fullName} ({emp.employeeCode})
-                              </span>
-                              <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px]">
-                                Khổ A4 Dọc
-                              </span>
-                            </div>
-
-                            <div 
-                              dangerouslySetInnerHTML={{ 
-                                __html: fillDocumentTemplate(commitmentTemplate, emp, settings, fillOptions) 
-                              }} 
-                            />
-                          </div>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
+                      <div 
+                        style={{ fontFamily: "Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif" }}
+                        dangerouslySetInnerHTML={{ 
+                          __html: doc.html 
+                        }} 
+                      />
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -989,9 +1017,10 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex justify-center">
-                <div className="w-full max-w-[210mm] bg-white shadow-xl rounded-xl p-8 border border-slate-300">
+                <div className="w-full max-w-[210mm] bg-white shadow-xl rounded-xl p-8 border border-slate-300" style={{ fontFamily: "Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif" }}>
                   {sampleEmployee ? (
                     <div 
+                      style={{ fontFamily: "Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif" }}
                       dangerouslySetInnerHTML={{ 
                         __html: fillDocumentTemplate(
                           editingDocType === 'contract' ? contractTemplate : commitmentTemplate,
@@ -1020,50 +1049,109 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
 
       </div>
 
-      {/* Media Print Global CSS for Pure Pristine A4 Pages */}
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 15mm 15mm 15mm 15mm;
-          }
-          body {
-            visibility: hidden;
-            background: white !important;
-          }
-          #contracts-batch-print-area, #contracts-batch-print-area * {
-            visibility: visible;
-          }
-          #contracts-batch-print-area {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-          .contract-print-page {
-            page-break-after: always;
-            break-after: page;
-            border: none !important;
-            box-shadow: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            background: transparent !important;
-          }
-          .contract-print-page:last-child {
-            page-break-after: avoid;
-            break-after: avoid;
-          }
-          .contract-document, .commitment-document {
-            font-family: Arial, Helvetica, sans-serif !important;
-            font-size: 13pt !important;
-            line-height: 1.6 !important;
-            color: black !important;
-          }
-        }
-      `}} />
+      {/* DEDICATED PRINT PORTAL ATTACHED DIRECTLY TO DOCUMENT BODY */}
+      {createPortal(
+        <div id="contracts-batch-print-portal" className="hidden print:block">
+          <style dangerouslySetInnerHTML={{ __html: `
+            @media print {
+              @page {
+                size: A4 portrait;
+                margin: 15mm 15mm 15mm 15mm;
+              }
+
+              /* Hide the entire application inside #root to avoid any interference from modal/overflow/fixed wrappers */
+              #root {
+                display: none !important;
+              }
+
+              html, body {
+                visibility: visible !important;
+                background: white !important;
+                color: black !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                height: auto !important;
+                min-height: auto !important;
+                overflow: visible !important;
+                font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif !important;
+              }
+
+              #contracts-batch-print-portal {
+                display: block !important;
+                position: static !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: white !important;
+                font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif !important;
+              }
+
+              .contract-print-page {
+                display: block !important;
+                position: static !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                page-break-after: always !important;
+                break-after: page !important;
+                page-break-inside: auto !important;
+                break-inside: auto !important;
+                box-sizing: border-box !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: white !important;
+                font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif !important;
+              }
+
+              .contract-print-page:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+              }
+
+              .contract-document, 
+              .commitment-document,
+              .contract-document *, 
+              .commitment-document *,
+              .contract-print-page,
+              .contract-print-page * {
+                font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif !important;
+                color: black !important;
+              }
+
+              .contract-document, 
+              .commitment-document {
+                font-size: 13pt !important;
+                line-height: 1.55 !important;
+              }
+
+              .break-inside-avoid,
+              .contract-signature-block {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+              }
+
+              .print\\:hidden {
+                display: none !important;
+              }
+            }
+          `}} />
+
+          {printDocuments.map((doc, idx) => (
+            <div 
+              key={`portal-${doc.key}`}
+              className={`contract-print-page ${idx === printDocuments.length - 1 ? 'is-last-document' : ''}`}
+              style={{ fontFamily: "Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif" }}
+            >
+              <div 
+                style={{ fontFamily: "Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif" }}
+                dangerouslySetInnerHTML={{ __html: doc.html }} 
+              />
+            </div>
+          ))}
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

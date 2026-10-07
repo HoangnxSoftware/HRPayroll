@@ -131,7 +131,7 @@ export function formatDateVN(dateStr?: string): string {
  * Theo Bộ luật Lao động 2019 (Luật số 45/2019/QH14)
  */
 export const DEFAULT_CONTRACT_TEMPLATE = `
-<div style="font-family: Calibri, 'Segoe UI', Candara, Arial, sans-serif;" class="contract-document text-slate-900 font-sans leading-relaxed text-[13.5px]">
+<div style="font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif;" class="contract-document text-slate-900 font-sans leading-relaxed text-[13.5px]">
   <!-- Quốc hiệu Tiêu ngữ -->
   <div class="text-center mb-5">
     <p class="font-bold text-base tracking-wider uppercase">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</p>
@@ -243,7 +243,7 @@ export const DEFAULT_CONTRACT_TEMPLATE = `
  * Áp dụng cho cá nhân cam kết thu nhập chưa đến mức khấu trừ thuế TNCN
  */
 export const DEFAULT_COMMITMENT_TEMPLATE = `
-<div style="font-family: Calibri, 'Segoe UI', Candara, Arial, sans-serif;" class="commitment-document text-slate-900 font-sans leading-relaxed text-[13.5px]">
+<div style="font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif;" class="commitment-document text-slate-900 font-sans leading-relaxed text-[13.5px]">
   <!-- Quốc hiệu Tiêu ngữ -->
   <div class="text-center mb-5">
     <p class="font-bold text-base tracking-wider uppercase">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</p>
@@ -443,6 +443,13 @@ export function fillDocumentTemplate(
     `Giới tính: <strong>${employee.gender || 'Nam'}</strong> - Quốc tịch: <strong>${employee.nationality || 'Việt Nam'}</strong>`
   );
 
+  // Đảm bảo toàn bộ nội dung văn bản chuẩn mặc định sang font Calibri
+  output = output.replace(/font-serif/g, 'font-sans');
+  output = output.replace(/font-family:\s*[^;"]+/gi, "font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif");
+  if (!output.includes('Calibri')) {
+    output = output.replace(/class="(contract-document|commitment-document)/g, 'style="font-family: Calibri, \'Segoe UI\', Candara, \'Liberation Sans\', Arial, sans-serif;" class="$1');
+  }
+
   return output;
 }
 
@@ -472,9 +479,9 @@ export function getSavedContractTemplate(settings?: SystemSettings): string {
         );
       }
       tpl = tpl.replace(/font-serif/g, 'font-sans');
-      tpl = tpl.replace(/font-family:\s*Arial,\s*Helvetica,\s*sans-serif/gi, "font-family: Calibri, 'Segoe UI', Candara, Arial, sans-serif");
-      if (!tpl.includes('font-family')) {
-        tpl = tpl.replace(/class="contract-document/g, 'style="font-family: Calibri, \'Segoe UI\', Candara, Arial, sans-serif;" class="contract-document');
+      tpl = tpl.replace(/font-family:\s*[^;"]+/gi, "font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif");
+      if (!tpl.includes('Calibri')) {
+        tpl = tpl.replace(/class="contract-document/g, 'style="font-family: Calibri, \'Segoe UI\', Candara, \'Liberation Sans\', Arial, sans-serif;" class="contract-document');
       }
       return tpl;
     }
@@ -498,9 +505,9 @@ export function getSavedCommitmentTemplate(settings?: SystemSettings): string {
 
     if (tpl) {
       tpl = tpl.replace(/font-serif/g, 'font-sans');
-      tpl = tpl.replace(/font-family:\s*Arial,\s*Helvetica,\s*sans-serif/gi, "font-family: Calibri, 'Segoe UI', Candara, Arial, sans-serif");
-      if (!tpl.includes('font-family')) {
-        tpl = tpl.replace(/class="commitment-document/g, 'style="font-family: Calibri, \'Segoe UI\', Candara, Arial, sans-serif;" class="commitment-document');
+      tpl = tpl.replace(/font-family:\s*[^;"]+/gi, "font-family: Calibri, 'Segoe UI', Candara, 'Liberation Sans', Arial, sans-serif");
+      if (!tpl.includes('Calibri')) {
+        tpl = tpl.replace(/class="commitment-document/g, 'style="font-family: Calibri, \'Segoe UI\', Candara, \'Liberation Sans\', Arial, sans-serif;" class="commitment-document');
       }
       return tpl;
     }

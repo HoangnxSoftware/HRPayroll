@@ -42,6 +42,7 @@ import {
   DEFAULT_TAX_EXEMPTION_RULES,
   calculateTaxBreakdown,
   calculateCombinedAnnualTaxReport,
+  calculateEmployeePayroll,
   CombinedAnnualTaxRecord,
   getAvailableYears
 } from '../utils/payrollCalculator';
@@ -94,6 +95,10 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
   const [isBreakdownPrintOpen, setIsBreakdownPrintOpen] = useState(false);
   const [isEditBracketsOpen, setIsEditBracketsOpen] = useState(false);
   const [isEditExemptionOpen, setIsEditExemptionOpen] = useState(false);
+
+  // Month & Year state for Taxable & Exempt Income Breakdown tab (từng tháng)
+  const [breakdownSelectedMonth, setBreakdownSelectedMonth] = useState<number>(settings.currentMonth || 9);
+  const [breakdownSelectedYear, setBreakdownSelectedYear] = useState<number>(settings.currentYear || 2026);
 
   // Modal điều chỉnh khoản giảm trừ khác từng người trong tháng (từ thiện, nhân đạo, hưu trí...)
   const [otherDeductionModal, setOtherDeductionModal] = useState<{
@@ -152,6 +157,42 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
       return true;
     });
   }, [payrolls, empMap, selectedDepartment, taxFilter, searchTerm]);
+
+  // Payrolls for Taxable & Exempt Income Breakdown tab for selected month & year (Từng tháng)
+  const breakdownPayrolls = useMemo(() => {
+    if (breakdownSelectedMonth === settings.currentMonth && breakdownSelectedYear === settings.currentYear) {
+      return filteredPayrolls;
+    }
+    const monthStr = `${breakdownSelectedYear}-${String(breakdownSelectedMonth).padStart(2, '0')}`;
+    const monthSettings: SystemSettings = {
+      ...settings,
+      currentMonth: breakdownSelectedMonth,
+      currentYear: breakdownSelectedYear
+    };
+    return employees.map(emp => {
+      const tk = timekeepings.find(t => t.employeeId === emp.id && (String(t.month) === monthStr || String(t.month) === String(breakdownSelectedMonth)));
+      const ins = insurances.find(i => i.employeeId === emp.id);
+      const meal = mealRegistrations.find(m => m.employeeId === emp.id && (m.month === monthStr || String(m.month) === String(breakdownSelectedMonth)));
+      const empAllowances = specialAllowances.filter(a => a.employeeId === emp.id && (a.month === monthStr || !a.month));
+      const empDependents = dependents.filter(d => d.employeeId === emp.id);
+      return calculateEmployeePayroll(emp, tk, ins, meal, empAllowances, empDependents, monthSettings, 0, 0, timekeepings);
+    }).filter(p => {
+      const emp = empMap.get(p.employeeId);
+      if (!emp) return false;
+      if (selectedDepartment !== 'all' && emp.departmentId !== selectedDepartment) return false;
+      if (taxFilter === 'tax_only' && p.personalIncomeTax <= 0) return false;
+      if (taxFilter === 'no_tax' && p.personalIncomeTax > 0) return false;
+      if (searchTerm) {
+        const search = searchTerm.toLowerCase();
+        const matchName = emp.fullName.toLowerCase().includes(search);
+        const matchCode = emp.employeeCode.toLowerCase().includes(search);
+        const matchTax = emp.taxId ? emp.taxId.includes(search) : false;
+        const matchCccd = emp.idCardNumber ? emp.idCardNumber.includes(search) : false;
+        return matchName || matchCode || matchTax || matchCccd;
+      }
+      return true;
+    });
+  }, [breakdownSelectedMonth, breakdownSelectedYear, settings, filteredPayrolls, employees, timekeepings, insurances, mealRegistrations, specialAllowances, dependents, empMap, selectedDepartment, taxFilter, searchTerm]);
 
   // Grand Totals for current month
   const totalGross = useMemo(() => payrolls.reduce((s, p) => s + p.grossIncome, 0), [payrolls]);
@@ -1182,7 +1223,7 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'taxable_breakdown' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+          <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-emerald-600" />
               <div>
@@ -1190,16 +1231,42 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                 <p className="text-xs text-slate-500">Phân định từng thành phần theo quy định của Luật Thuế TNCN và Bộ luật Lao động</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {/* Chọn Tháng & Năm để Bóc Tách Thu Nhập & In Từng Tháng */}
+              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-300 shadow-2xs text-xs">
+                <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                <span className="font-bold text-slate-700">Kỳ tính:</span>
+                <select
+                  value={breakdownSelectedMonth}
+                  onChange={e => setBreakdownSelectedMonth(Number(e.target.value))}
+                  className="bg-transparent font-bold text-indigo-900 outline-none cursor-pointer"
+                >
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => (
+                    <option key={m} value={m}>Tháng {m}</option>
+                  ))}
+                </select>
+                <select
+                  value={breakdownSelectedYear}
+                  onChange={e => setBreakdownSelectedYear(Number(e.target.value))}
+                  className="bg-transparent font-bold text-slate-700 outline-none cursor-pointer ml-1"
+                >
+                  {getAvailableYears(breakdownSelectedYear).map(y => (
+                    <option key={y} value={y}>Năm {y}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Nút In Thu Nhập Chịu Thuế & Miễn Thuế Của Từng Tháng */}
               <button
                 type="button"
                 onClick={() => setIsBreakdownPrintOpen(true)}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
-                title="In Báo cáo bóc tách thu nhập chịu thuế và miễn thuế theo tháng (khổ A4 hoặc kết xuất Excel)"
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
+                title={`In Thu nhập chịu thuế & Miễn thuế của Tháng ${breakdownSelectedMonth}/${breakdownSelectedYear}`}
               >
                 <Printer className="w-4 h-4" />
-                <span>In Báo Cáo Bóc Tách (Tháng {settings.currentMonth})</span>
+                <span>In Báo Cáo Bóc Tách (Tháng {breakdownSelectedMonth}/{breakdownSelectedYear})</span>
               </button>
+
               {canEditSettings && (
                 <button
                   onClick={() => setIsEditExemptionOpen(true)}
@@ -1234,7 +1301,7 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-mono">
-                {filteredPayrolls.map((p, idx) => {
+                {breakdownPayrolls.map((p, idx) => {
                   const emp = empMap.get(p.employeeId);
                   const mealCap = settings.taxExemptionRules?.mealExemptMonthlyCap ?? settings.monthlyMealFlatRate ?? 1200000;
                   const mealExempt = p.mealTaxExempt !== undefined ? p.mealTaxExempt : Math.min(p.mealAllowance || 0, mealCap);
@@ -1458,9 +1525,13 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
         isOpen={isBreakdownPrintOpen}
         onClose={() => setIsBreakdownPrintOpen(false)}
         employees={employees}
-        payrolls={filteredPayrolls}
-        settings={settings}
-        month={String(settings.currentMonth)}
+        payrolls={breakdownPayrolls}
+        settings={{
+          ...settings,
+          currentMonth: breakdownSelectedMonth,
+          currentYear: breakdownSelectedYear
+        }}
+        month={String(breakdownSelectedMonth)}
       />
 
       {/* Modal In Báo Cáo Quyết Toán Thuế TNCN Cả Năm */}
