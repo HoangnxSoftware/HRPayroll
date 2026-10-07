@@ -16,9 +16,11 @@ import {
   CheckSquare,
   Square,
   Sparkles,
-  Info
+  Info,
+  Download
 } from 'lucide-react';
-import { Employee, Department, Position, SystemSettings, WorkHistoryItem } from '../types';
+import * as XLSX from 'xlsx';
+import { Employee, Department, Position, SystemSettings, WorkHistoryItem, InsuranceRecord } from '../types';
 import { 
   TEMPLATE_VARIABLES, 
   fillDocumentTemplate, 
@@ -27,7 +29,8 @@ import {
   saveContractTemplate, 
   saveCommitmentTemplate, 
   resetContractTemplate, 
-  resetCommitmentTemplate 
+  resetCommitmentTemplate,
+  numberToWordsVietnamese
 } from '../utils/documentTemplates';
 
 export type DocumentType = 'contract' | 'commitment' | 'both';
@@ -48,6 +51,7 @@ interface PrintBatchContractsModalProps {
   initialSelectedEmployeeIds?: string[];
   initialDocType?: DocumentType;
   periodOverride?: PeriodContractOverride | null;
+  insurances?: InsuranceRecord[];
 }
 
 export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> = ({
@@ -61,6 +65,7 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
   initialSelectedEmployeeIds,
   initialDocType = 'contract',
   periodOverride = null,
+  insurances = [],
 }) => {
   if (!isOpen) return null;
 
@@ -69,6 +74,11 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
   
   // Document Type to print
   const [docType, setDocType] = useState<DocumentType>(initialDocType);
+
+  // Giai đoạn công tác được chọn cho nhân viên đơn lẻ (nếu có lịch sử quá trình làm việc)
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(() => {
+    return periodOverride?.item?.id || null;
+  });
 
   // Selected employee IDs for batch printing
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
@@ -132,6 +142,44 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
   const selectedEmployees = useMemo(() => {
     return employees.filter(e => selectedIds.has(e.id));
   }, [employees, selectedIds]);
+
+  // Đối chiếu giai đoạn làm việc & mức đóng BHXH
+  const effectivePeriodOverride = useMemo<PeriodContractOverride | null>(() => {
+    if (selectedEmployees.length !== 1) return null;
+    const targetEmp = selectedEmployees[0];
+    if (!targetEmp.workHistory || targetEmp.workHistory.length === 0) {
+      return periodOverride || null;
+    }
+
+    if (selectedPeriodId) {
+      const foundItem = targetEmp.workHistory.find(
+        (wh, idx) => (wh.id || `wh-${idx}`) === selectedPeriodId
+      );
+      if (foundItem) {
+        // Đối chiếu mức đóng BHXH từ Quá trình & Mức đóng BHXH
+        const matchingIns = insurances?.find(i => i.employeeId === targetEmp.id);
+        let matchedIns = matchingIns?.insuranceSalary || foundItem.baseSalary;
+        if (matchingIns?.history && matchingIns.history.length > 0) {
+          const periodMonth = foundItem.fromMonth.slice(0, 7);
+          const foundHist = matchingIns.history.find(h => {
+            if (h.fromMonth <= periodMonth) {
+              if (!h.toMonth || h.toMonth >= periodMonth) return true;
+            }
+            return false;
+          }) || matchingIns.history[matchingIns.history.length - 1];
+          if (foundHist) {
+            matchedIns = foundHist.salary;
+          }
+        }
+        return {
+          item: foundItem,
+          matchedInsSalary: matchedIns
+        };
+      }
+    }
+
+    return periodOverride || null;
+  }, [selectedEmployees, selectedPeriodId, periodOverride, insurances]);
 
   // Toggle selection
   const toggleEmployee = (id: string) => {
@@ -233,6 +281,128 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
     window.print();
   };
 
+  const handleExportExcel = () => {
+    const depMap = new Map(departments.map(d => [d.id, d.name]));
+    const posMap = new Map(positions.map(p => [p.id, p.name]));
+
+    const excelRows = [
+      [settings.companyName.toUpperCase()],
+      [`Địa chỉ: ${settings.address}`],
+      [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
+      [],
+      [`DANH SÁCH & CHI TIẾT HỢP ĐỒNG LAO ĐỘNG VÀ BẢN CAM KẾT THU NHẬP`],
+      [`Loại văn bản: ${docType === 'contract' ? 'Hợp đồng lao động' : docType === 'commitment' ? 'Bản cam kết thu nhập (Mẫu 08/CK-TNCN)' : 'Cả hai (HĐLĐ & Bản cam kết)'} • Số lượng: ${selectedEmployees.length} nhân sự`],
+      [],
+      [
+        'STT',
+        'Mã NV',
+        'Họ và Tên',
+        'Giới Tính',
+        'Ngày Sinh',
+        'Số CCCD',
+        'Ngày Cấp',
+        'Nơi Cấp',
+        'Địa Chỉ Thường Trú',
+        'Số Điện Thoại',
+        'Email',
+        'Phòng Ban',
+        'Chức Vụ',
+        'Loại Hợp Đồng',
+        'Ngày Bắt Đầu Làm',
+        'Mức Lương Cơ Bản (VNĐ)',
+        'Lương Bằng Chữ',
+        'Mức Lương Đóng BHXH (Đối Chiếu)',
+        'Hình Thức Trả Lương',
+        'Đại Diện Bên A Ký',
+        'Ngày Ký Văn Bản'
+      ],
+      ...selectedEmployees.map((emp, idx) => {
+        const isPeriod = effectivePeriodOverride && effectivePeriodOverride.item && selectedEmployees.length === 1;
+        const targetDepId = isPeriod ? effectivePeriodOverride!.item.departmentId : emp.departmentId;
+        const targetPosId = isPeriod ? effectivePeriodOverride!.item.positionId : emp.positionId;
+        const depName = depMap.get(targetDepId) || 'Bộ phận chuyên môn';
+        const posName = posMap.get(targetPosId) || 'Nhân viên';
+        const baseSal = isPeriod ? effectivePeriodOverride!.item.baseSalary : emp.baseSalary;
+        const insSal = isPeriod ? effectivePeriodOverride!.matchedInsSalary : (emp.baseSalary || 0);
+        const resolvedContractType = isPeriod 
+          ? (effectivePeriodOverride!.item.workStatus === 'probation' 
+              ? 'Hợp đồng lao động thử việc (02 tháng)' 
+              : 'Hợp đồng lao động xác định thời hạn')
+          : contractType;
+
+        return [
+          idx + 1,
+          emp.employeeCode,
+          emp.fullName,
+          emp.gender || 'Nam',
+          emp.birthDate || '',
+          emp.idCardNumber || '',
+          emp.issueDate || '',
+          emp.issuePlace || '',
+          emp.address || '',
+          emp.phoneNumber || '',
+          emp.email || '',
+          depName,
+          posName,
+          resolvedContractType,
+          isPeriod ? effectivePeriodOverride!.item.fromMonth : emp.startDate,
+          baseSal,
+          numberToWordsVietnamese(baseSal),
+          insSal,
+          emp.salaryBasis === 'monthly' ? 'Lương tháng' : 'Theo ngày công',
+          representativeName,
+          isPeriod ? effectivePeriodOverride!.item.fromMonth : signDate
+        ];
+      }),
+      [],
+      [],
+      ['NGƯỜI LẬP BIỂU', '', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', 'ĐẠI DIỆN NGƯỜI SỬ DỤNG LAO ĐỘNG'],
+      ['(Ký, ghi rõ họ tên)', '', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
+      [],
+      [],
+      [
+        settings.reportPreparerName || 'Phạm Hồng Phúc',
+        '',
+        '',
+        '',
+        settings.chiefAccountantName || 'Trần Thị Thu Hương',
+        '',
+        '',
+        '',
+        representativeName || settings.directorName || 'Nguyễn Văn Thành'
+      ]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(excelRows);
+    ws['!cols'] = [
+      { wch: 6 },
+      { wch: 12 },
+      { wch: 24 },
+      { wch: 10 },
+      { wch: 12 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 25 },
+      { wch: 30 },
+      { wch: 14 },
+      { wch: 22 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 30 },
+      { wch: 14 },
+      { wch: 18 },
+      { wch: 30 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 22 },
+      { wch: 14 }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'HopDong_CamKet');
+    XLSX.writeFile(wb, `Danh_Sach_Hop_Dong_Cam_Ket_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   const sampleEmployee = employees[previewEmployeeIndex] || employees[0];
 
   return (
@@ -287,15 +457,26 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
             </div>
 
             {activeTab === 'print' && (
-              <button
-                onClick={handlePrint}
-                disabled={selectedEmployees.length === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-                title="In ngay tất cả tài liệu đã chọn ra máy in hoặc lưu PDF"
-              >
-                <Printer className="w-4 h-4" />
-                <span>In Ngay ({selectedEmployees.length * (docType === 'both' ? 2 : 1)} bản)</span>
-              </button>
+              <>
+                <button
+                  onClick={handleExportExcel}
+                  disabled={selectedEmployees.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  title="Kết xuất danh sách và chi tiết hợp đồng lao động / bản cam kết thu nhập ra Excel"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Kết Xuất Excel</span>
+                </button>
+                <button
+                  onClick={handlePrint}
+                  disabled={selectedEmployees.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  title="In ngay tất cả tài liệu đã chọn ra máy in hoặc lưu PDF"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>In Ngay / Lưu PDF ({selectedEmployees.length * (docType === 'both' ? 2 : 1)} bản)</span>
+                </button>
+              </>
             )}
 
             <button
@@ -417,6 +598,40 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
                     className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none font-medium"
                   />
                 </div>
+
+                {/* Chọn in theo từng giai đoạn trong Quá Trình Làm Việc */}
+                {selectedEmployees.length === 1 && selectedEmployees[0].workHistory && selectedEmployees[0].workHistory.length > 0 && (
+                  <div className="p-2.5 bg-emerald-50/70 rounded-xl border border-emerald-300 space-y-1.5 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-emerald-950 uppercase tracking-wide">
+                        In Theo Giai Đoạn Công Tác:
+                      </label>
+                      <span className="text-[10px] text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded font-semibold">
+                        {selectedEmployees[0].workHistory.length} giai đoạn
+                      </span>
+                    </div>
+                    <select
+                      value={selectedPeriodId || 'current'}
+                      onChange={e => setSelectedPeriodId(e.target.value === 'current' ? null : e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-emerald-400 rounded-lg text-xs bg-white text-emerald-950 font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    >
+                      <option value="current">Giai đoạn hiện tại (Hồ sơ chính thức)</option>
+                      {selectedEmployees[0].workHistory.map((wh, idx) => {
+                        const pos = posMap.get(wh.positionId) || 'Nhân viên';
+                        return (
+                          <option key={wh.id || `wh-${idx}`} value={wh.id || `wh-${idx}`}>
+                            {wh.fromMonth} → {wh.toMonth || 'Đến nay'} ({pos} - {new Intl.NumberFormat('vi-VN').format(wh.baseSalary)} đ)
+                          </option>
+                        );
+                      })}
+                    </select>
+                    {effectivePeriodOverride && (
+                      <p className="text-[11px] text-emerald-800 leading-snug">
+                        ✓ Đối chiếu mức đóng BHXH: <strong className="font-mono font-bold text-emerald-950">{new Intl.NumberFormat('vi-VN').format(effectivePeriodOverride.matchedInsSalary)} đ</strong>
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Batch Employee Selection List */}

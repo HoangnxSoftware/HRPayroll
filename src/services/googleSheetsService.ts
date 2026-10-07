@@ -1454,10 +1454,21 @@ export const importFullDataFromGoogleSheets = async (
       if (saved) {
         baseSettings = { ...initialSettings, ...JSON.parse(saved) };
       }
+      const savedAddress = localStorage.getItem('payroll_company_address');
+      if (savedAddress && savedAddress.trim()) {
+        baseSettings.address = savedAddress.trim();
+      }
+      const savedPhone = localStorage.getItem('payroll_company_phone');
+      if (savedPhone && savedPhone.trim() && savedPhone !== 'capped' && savedPhone !== 'fully_exempt') {
+        baseSettings.phoneNumber = savedPhone.trim();
+      }
     } catch (e) {}
 
     if (sRows && sRows.length > 1) {
       const settingsMap = new Map<string, string>();
+      let foundAddressFromRow: string | null = null;
+      let foundPhoneFromRow: string | null = null;
+
       for (const row of sRows) {
         if (!row || row.length < 2) continue;
         const col0 = String(row[0] || '').trim();
@@ -1466,6 +1477,27 @@ export const importFullDataFromGoogleSheets = async (
 
         // Bỏ qua dòng tiêu đề bảng hoặc header nhóm nếu không có giá trị
         if (col0.startsWith('CẤU HÌNH') || col0.startsWith('Nhóm Thiết Lập') || col0.startsWith('CAU HINH')) continue;
+
+        const cleanCol1 = cleanKey(col1);
+        const cleanCol0 = cleanKey(col0);
+
+        // Bắt trực tiếp Địa chỉ trụ sở từ hàng thông tin đơn vị
+        if (cleanCol1 === 'dia chi tru so' || cleanCol1 === 'dia chi cong ty' || (cleanCol1 === 'dia chi' && col0.includes('I.'))) {
+          if (col2) foundAddressFromRow = col2;
+        } else if (cleanCol0 === 'dia chi tru so' || cleanCol0 === 'dia chi cong ty') {
+          if (col1) foundAddressFromRow = col1;
+        }
+
+        // Bắt trực tiếp Số điện thoại liên hệ từ hàng thông tin đơn vị
+        if (cleanCol1 === 'so dien thoai lien he' || cleanCol1 === 'so dien thoai' || (cleanCol1 === 'dien thoai' && col0.includes('I.'))) {
+          if (col2 && col2 !== 'capped' && col2 !== 'fully_exempt' && !col2.includes('quy che')) {
+            foundPhoneFromRow = col2;
+          }
+        } else if (cleanCol0 === 'so dien thoai lien he' || cleanCol0 === 'so dien thoai') {
+          if (col1 && col1 !== 'capped' && col1 !== 'fully_exempt' && !col1.includes('quy che')) {
+            foundPhoneFromRow = col1;
+          }
+        }
 
         // Nếu dòng có ít nhất 3 phần tử (định dạng 4 cột: [Nhóm, Chỉ số, Giá trị, Ghi chú] hoặc 3 cột [Nhóm, Chỉ số, Giá trị])
         if (row.length >= 3 && col1) {
@@ -1494,16 +1526,27 @@ export const importFullDataFromGoogleSheets = async (
         return isNaN(num) ? defaultVal : num;
       };
 
-      const getStringVal = (keys: string[], defaultVal: string): string => {
+      const getStringVal = (keys: string[], defaultVal: string, isPhoneOrAddress = false): string => {
         for (const k of keys) {
           const ck = cleanKey(k);
           const direct = settingsMap.get(ck) ?? settingsMap.get(k.toLowerCase().trim());
-          if (direct !== undefined && direct !== '') return direct;
+          if (direct !== undefined && direct !== '') {
+            if (isPhoneOrAddress && (direct === 'capped' || direct === 'fully_exempt' || direct === 'fully_taxable')) {
+              continue; // Bỏ qua giá trị enum của quy tắc miễn thuế
+            }
+            return direct;
+          }
         }
         for (const k of keys) {
           const ck = cleanKey(k);
           for (const [mk, mv] of settingsMap.entries()) {
+            if (isPhoneOrAddress && (mk.includes('mien thue') || mk.includes('quy dinh') || mk.includes('tran'))) {
+              continue; // Tránh nhầm với quy định miễn thuế điện thoại/xăng xe
+            }
             if (mk.includes(ck) && mv && mv !== '') {
+              if (isPhoneOrAddress && (mv === 'capped' || mv === 'fully_exempt' || mv === 'fully_taxable')) {
+                continue;
+              }
               return mv;
             }
           }
@@ -1511,12 +1554,34 @@ export const importFullDataFromGoogleSheets = async (
         return defaultVal;
       };
 
+      const resolvedAddress = foundAddressFromRow || getStringVal(
+        ['địa chỉ trụ sở', 'địa chỉ công ty', 'địa chỉ', 'tru so', 'address', 'dia chi'],
+        baseSettings.address,
+        true
+      );
+
+      const resolvedPhone = foundPhoneFromRow || getStringVal(
+        ['số điện thoại liên hệ', 'số điện thoại', 'điện thoại liên hệ', 'hotline', 'sđt', 'phone', 'so dien thoai'],
+        baseSettings.phoneNumber,
+        true
+      );
+
+      // Lưu đệm an toàn vào localStorage để bảo toàn thông tin công ty
+      try {
+        if (resolvedAddress && resolvedAddress.trim()) {
+          localStorage.setItem('payroll_company_address', resolvedAddress.trim());
+        }
+        if (resolvedPhone && resolvedPhone.trim() && resolvedPhone !== 'capped') {
+          localStorage.setItem('payroll_company_phone', resolvedPhone.trim());
+        }
+      } catch (_) {}
+
       const importedSettings: SystemSettings = {
         ...baseSettings,
         companyName: getStringVal(['tên đơn vị / doanh nghiệp', 'tên đơn vị', 'tên công ty', 'doanh nghiệp', 'company', 'company name'], baseSettings.companyName),
         taxCode: getStringVal(['mã số thuế (mst)', 'mã số thuế', 'mst', 'tax code', 'tax id'], baseSettings.taxCode),
-        address: getStringVal(['địa chỉ trụ sở', 'địa chỉ', 'trụ sở', 'địa chỉ công ty', 'tru so', 'address', 'dia chi'], baseSettings.address),
-        phoneNumber: getStringVal(['số điện thoại liên hệ', 'số điện thoại', 'điện thoại', 'hotline', 'sđt', 'phone', 'dien thoai', 'so dien thoai'], baseSettings.phoneNumber),
+        address: resolvedAddress,
+        phoneNumber: resolvedPhone,
         directorName: getStringVal(['giám đốc', 'director'], baseSettings.directorName),
         chiefAccountantName: getStringVal(['kế toán trưởng', 'chief accountant'], baseSettings.chiefAccountantName),
         reportPreparerName: getStringVal(['người lập biểu', 'preparer'], baseSettings.reportPreparerName),

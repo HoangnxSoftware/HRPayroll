@@ -433,11 +433,11 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
                 <strong className="text-slate-900 font-mono font-bold">{formatVND(grandSalaryAll)}</strong>
               </div>
               <div>
-                <span className="text-red-700 font-medium">Tổng NLĐ trích nộp ({empTotalRate}%):</span>{' '}
+                <span className="text-red-700 font-medium">Tổng NLĐ trích nộp:</span>{' '}
                 <strong className="text-red-700 font-mono font-bold">{formatVND(grandEmpTotalAll)}</strong>
               </div>
               <div>
-                <span className="text-purple-900 font-bold">Tổng nộp cơ quan BHXH ({totalAllRate}%):</span>{' '}
+                <span className="text-purple-900 font-bold">Tổng nộp cơ quan BHXH:</span>{' '}
                 <strong className="text-purple-900 font-mono font-black">{formatVND(grandTotalAll)}</strong>
               </div>
             </div>
@@ -583,10 +583,10 @@ export const PrintAnnualInsuranceModal: React.FC<PrintAnnualInsuranceModalProps>
                         Tổng Quỹ Lương Năm
                       </th>
                       <th colSpan={4} className="border border-slate-400 p-0.5 bg-red-50 text-red-950">
-                        Người Lao Động Đóng Cả Năm ({empTotalRate}%)
+                        Người Lao Động Đóng Cả Năm
                       </th>
                       <th colSpan={5} className="border border-slate-400 p-0.5 bg-blue-50 text-blue-950">
-                        Doanh Nghiệp Đóng Cả Năm ({erTotalRate}%)
+                        Doanh Nghiệp Đóng Cả Năm
                       </th>
                       <th rowSpan={2} className="border border-slate-400 p-1 min-w-[95px] bg-purple-100 text-purple-950 font-black">
                         Tổng Nộp Cả Năm

@@ -134,7 +134,7 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
       ],
       [],
       [],
-      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', '', '', '', 'GIÁM ĐỐC DOANH NGHIỆP'],
+      ['NGƯỜI LẬP BIỂU', '', '', 'KẾ TOÁN TRƯỞNG', '', '', '', '', '', '', '', '', '', '', 'NGƯỜI ĐẠI DIỆN PHÁP LUẬT'],
       ['(Ký, ghi rõ họ tên)', '', '', '(Ký, ghi rõ họ tên)', '', '', '', '', '', '', '', '', '', '', '(Ký, đóng dấu, ghi rõ họ tên)'],
       [],
       [],
@@ -476,10 +476,9 @@ export const PrintAnnualTaxModal: React.FC<PrintAnnualTaxModalProps> = ({
             </div>
 
             <div>
-              <div className="text-slate-500 italic text-[11px] mb-0.5">Ngày ..... tháng ..... năm {year}</div>
-              <div className="font-bold text-slate-800 uppercase">Tổng Giám Đốc / Người Đại Diện PL</div>
+              <div className="font-bold text-slate-800 uppercase">Người đại diện pháp luật</div>
               <div className="text-slate-500 italic text-[11px] mt-0.5">(Ký, đóng dấu, ghi rõ họ tên)</div>
-              <div className="h-14"></div>
+              <div className="h-16"></div>
               <div className="font-bold text-slate-900">{settings.directorName || 'Nguyễn Văn Thành'}</div>
             </div>
           </div>

@@ -151,8 +151,8 @@ export const PrintTaxBreakdownModal: React.FC<PrintTaxBreakdownModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto print:static print:inset-auto print:p-0 print:m-0 print:bg-white print:overflow-visible print:block print:w-full print:h-auto">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[96vw] max-h-[96vh] flex flex-col overflow-hidden print:max-w-none print:w-full print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none print:static print:p-0 print:m-0 print:block">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto print:p-0 print:bg-white">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[96vw] max-h-[96vh] flex flex-col overflow-hidden print:border-none print:shadow-none print:max-h-none print:max-w-none">
         {/* Top Control Bar (Hidden when printing) */}
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between print:hidden shrink-0">
           <div className="flex items-center gap-2.5">
@@ -189,40 +189,32 @@ export const PrintTaxBreakdownModal: React.FC<PrintTaxBreakdownModalProps> = ({
         </div>
 
         {/* Printable Paper Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-100 print:bg-white print:p-0 print:m-0 print:overflow-visible print:block">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-100 print:bg-white print:p-0">
           <style dangerouslySetInnerHTML={{ __html: `
             @media print {
               @page {
                 size: A4 landscape;
-                margin: 5mm 4mm;
+                margin: 6mm 4mm;
               }
-              html, body {
-                margin: 0 !important;
-                padding: 0 !important;
+              body {
+                visibility: hidden;
                 background: white !important;
-                color: black !important;
-                height: auto !important;
-                min-height: 0 !important;
-                overflow: visible !important;
-              }
-              body * {
-                visibility: hidden !important;
               }
               #tax-breakdown-print-sheet, #tax-breakdown-print-sheet * {
-                visibility: visible !important;
+                visibility: visible;
               }
               #tax-breakdown-print-sheet {
-                position: static !important;
-                left: auto !important;
-                top: auto !important;
+                position: absolute;
+                left: 0;
+                top: 0;
                 width: 100% !important;
                 max-width: 100% !important;
                 display: block !important;
-                padding: 0 !important;
                 margin: 0 !important;
+                padding: 0 !important;
                 border: none !important;
                 box-shadow: none !important;
-                overflow: visible !important;
+                background: white !important;
               }
               table {
                 font-size: 6.8pt !important;
@@ -237,7 +229,7 @@ export const PrintTaxBreakdownModal: React.FC<PrintTaxBreakdownModalProps> = ({
                 page-break-inside: avoid !important;
               }
               th, td {
-                padding: 2px 1.5px !important;
+                padding: 2.5px 1.5px !important;
                 min-width: 0 !important;
               }
               .print\\:hidden {

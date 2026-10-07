@@ -68,9 +68,16 @@ function PayrollAppContent() {
   const [settings, setSettings] = useState<SystemSettings>(() => {
     try {
       const saved = localStorage.getItem('payroll_system_settings');
-      if (saved) {
-        return { ...INITIAL_SETTINGS, ...JSON.parse(saved) };
+      let current = saved ? { ...INITIAL_SETTINGS, ...JSON.parse(saved) } : { ...INITIAL_SETTINGS };
+      const savedAddress = localStorage.getItem('payroll_company_address');
+      if (savedAddress && savedAddress.trim()) {
+        current.address = savedAddress.trim();
       }
+      const savedPhone = localStorage.getItem('payroll_company_phone');
+      if (savedPhone && savedPhone.trim() && savedPhone !== 'capped' && savedPhone !== 'fully_exempt') {
+        current.phoneNumber = savedPhone.trim();
+      }
+      return current;
     } catch (e) {
       console.warn('Lỗi đọc settings từ localStorage:', e);
     }
@@ -141,6 +148,12 @@ function PayrollAppContent() {
   useEffect(() => {
     try {
       localStorage.setItem('payroll_system_settings', JSON.stringify(settings));
+      if (settings.address && settings.address.trim()) {
+        localStorage.setItem('payroll_company_address', settings.address.trim());
+      }
+      if (settings.phoneNumber && settings.phoneNumber.trim() && settings.phoneNumber !== 'capped' && settings.phoneNumber !== 'fully_exempt') {
+        localStorage.setItem('payroll_company_phone', settings.phoneNumber.trim());
+      }
     } catch (e) {
       console.warn('Lỗi lưu settings:', e);
     }

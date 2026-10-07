@@ -1406,13 +1406,13 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                         Tổng Quỹ Lương Năm
                       </th>
                       <th colSpan={4} className="p-1 border-r border-slate-200 bg-red-50 text-red-950 font-bold">
-                        Người Lao Động Đóng Cả Năm ({empTotalRate}%)
+                        Người Lao Động Đóng Cả Năm
                       </th>
                       <th colSpan={5} className="p-1 border-r border-slate-200 bg-blue-50 text-blue-950 font-bold">
-                        Doanh Nghiệp Đóng Cả Năm ({erTotalRate}%)
+                        Doanh Nghiệp Đóng Cả Năm
                       </th>
                       <th rowSpan={2} className="p-2 min-w-[100px] bg-purple-100 text-purple-950 font-black">
-                        Tổng Nộp Cả Năm ({overallTotalRate}%)
+                        Tổng Nộp Cả Năm
                       </th>
                     </tr>
                     <tr className="text-[10px] font-semibold bg-slate-100">

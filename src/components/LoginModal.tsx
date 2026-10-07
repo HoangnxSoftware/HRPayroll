@@ -85,6 +85,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [newCompanyTaxCode, setNewCompanyTaxCode] = useState('');
   const [newCompanyDirector, setNewCompanyDirector] = useState('');
   const [newCompanyAccountant, setNewCompanyAccountant] = useState('');
+  const [newCompanyAddress, setNewCompanyAddress] = useState('');
+  const [newCompanyPhone, setNewCompanyPhone] = useState('');
   const [isPendingNewCompany, setIsPendingNewCompany] = useState<FullPayrollData | null>(null);
   const [newCompanySuccessNotice, setNewCompanySuccessNotice] = useState<string | null>(null);
 
@@ -213,6 +215,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         taxCode: newCompanyTaxCode.trim(),
         directorName: newCompanyDirector.trim(),
         chiefAccountantName: newCompanyAccountant.trim(),
+        address: newCompanyAddress.trim(),
+        phoneNumber: newCompanyPhone.trim(),
         currentYear: new Date().getFullYear(),
         currentMonth: new Date().getMonth() + 1
       });
@@ -812,6 +816,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       placeholder="Trần Thị B"
                       value={newCompanyAccountant}
                       onChange={e => setNewCompanyAccountant(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-slate-900 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Địa chỉ trụ sở</label>
+                    <input
+                      type="text"
+                      placeholder="Tầng 5, Tòa nhà ABC, Hà Nội"
+                      value={newCompanyAddress}
+                      onChange={e => setNewCompanyAddress(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-slate-900 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Số điện thoại liên hệ</label>
+                    <input
+                      type="text"
+                      placeholder="024.1234.5678"
+                      value={newCompanyPhone}
+                      onChange={e => setNewCompanyPhone(e.target.value)}
                       className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-slate-900 focus:ring-2 focus:ring-teal-500 focus:outline-none"
                     />
                   </div>

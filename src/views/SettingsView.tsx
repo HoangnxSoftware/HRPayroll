@@ -88,6 +88,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      if (formData.address && formData.address.trim()) {
+        localStorage.setItem('payroll_company_address', formData.address.trim());
+      }
+      if (formData.phoneNumber && formData.phoneNumber.trim() && formData.phoneNumber !== 'capped' && formData.phoneNumber !== 'fully_exempt') {
+        localStorage.setItem('payroll_company_phone', formData.phoneNumber.trim());
+      }
+    } catch (_) {}
     onUpdateSettings(formData);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
