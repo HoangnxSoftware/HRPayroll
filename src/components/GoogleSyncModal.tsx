@@ -12,7 +12,9 @@ import {
   DownloadCloud,
   ShieldCheck,
   FolderOpen,
-  Folder
+  Folder,
+  Lock,
+  AlertTriangle
 } from 'lucide-react';
 import { GoogleSyncState, SystemSettings } from '../types';
 import { googleSignIn, logout, getCurrentUser } from '../services/authService';
@@ -118,6 +120,12 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
 
   // Requirement: Explicit user confirmation dialog before updating/overwriting end user data in Google Drive/Sheets
   const requestSyncToGoogleSheets = () => {
+    const isDemo = syncState.isDemoMode || localStorage.getItem('payroll_is_demo_mode') === 'true';
+    if (isDemo) {
+      setActionMessage('ĐÃ KHÓA ĐỒNG BỘ: Bạn đang ở chế độ Dữ liệu mẫu nội bộ. Hệ thống không cho phép đồng bộ dữ liệu mẫu lên Google Sheets nhằm bảo vệ cơ sở dữ liệu đã kết nối.');
+      return;
+    }
+
     if (!syncState.spreadsheetId) {
       setActionMessage('Vui lòng tạo hoặc liên kết Google Spreadsheet trước khi đồng bộ.');
       return;
@@ -210,6 +218,23 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
 
         {/* Content */}
         <div className="p-6 space-y-6">
+          {/* Demo Mode Block Alert */}
+          {syncState.isDemoMode && (
+            <div className="p-4 bg-red-50 border-2 border-red-400 rounded-2xl text-xs text-red-900 flex items-start gap-3 shadow-xs animate-in fade-in">
+              <div className="p-2 bg-red-600 text-white rounded-xl shrink-0 mt-0.5 shadow-xs">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="font-black text-sm text-red-800 uppercase tracking-tight">
+                  Chế Độ Dữ Liệu Mẫu Nội Bộ: Tính Năng Đồng Bộ Bị Khóa!
+                </div>
+                <p className="text-red-700 leading-relaxed text-[11px]">
+                  Bạn đang đăng nhập bằng <strong>Dữ liệu mẫu nội bộ (Offline/Demo)</strong>. Tính năng đồng bộ / đẩy dữ liệu lên Google Sheets đã bị khóa nhằm tránh ghi đè dữ liệu mẫu vào cơ sở dữ liệu đã kết nối trên Google Sheets của doanh nghiệp.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Status Bar */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200 gap-3">
             <div>
@@ -326,14 +351,24 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
 
           {/* Sync Actions */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
-              onClick={requestSyncToGoogleSheets}
-              disabled={!syncState.isConnected || !syncState.spreadsheetId || isProcessing}
-              className="flex items-center justify-center gap-2 p-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium text-sm shadow-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <UploadCloud className="w-4 h-4" />
-              <span>Đẩy Dữ Liệu Lên Google Sheets</span>
-            </button>
+            {(() => {
+              const isDemo = syncState.isDemoMode || localStorage.getItem('payroll_is_demo_mode') === 'true';
+              return (
+                <button
+                  onClick={requestSyncToGoogleSheets}
+                  disabled={isDemo || !syncState.isConnected || !syncState.spreadsheetId || isProcessing}
+                  className={`flex items-center justify-center gap-2 p-3.5 rounded-xl font-bold text-sm shadow-xs transition-colors ${
+                    isDemo 
+                      ? 'bg-red-50 text-red-500 border border-red-300 cursor-not-allowed opacity-75' 
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer'
+                  }`}
+                  title={isDemo ? 'Đã khóa đồng bộ do đang hoạt động ở chế độ Dữ liệu mẫu nội bộ' : 'Đẩy dữ liệu lên Google Sheets'}
+                >
+                  {isDemo ? <Lock className="w-4 h-4 text-red-600" /> : <UploadCloud className="w-4 h-4" />}
+                  <span>{isDemo ? 'Khóa Đồng Bộ (Dữ liệu mẫu)' : 'Đẩy Dữ Liệu Lên Google Sheets'}</span>
+                </button>
+              );
+            })()}
 
             <button
               onClick={requestImportFromGoogleSheets}

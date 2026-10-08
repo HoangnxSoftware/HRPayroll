@@ -21,7 +21,11 @@ import {
   Database,
   Search,
   Check,
-  X
+  X,
+  AlertOctagon,
+  ShieldAlert,
+  ArrowLeft,
+  AlertTriangle
 } from 'lucide-react';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { SystemSettings, GoogleSyncState } from '../types';
@@ -59,7 +63,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onLoadDataFromSpreadsheet,
   onResetToDemoData
 }) => {
-  const { login, isAuthenticated } = useAuthRole();
+  const { login, isAuthenticated, users } = useAuthRole();
   const [activeTab, setActiveTab] = useState<'login' | 'google'>('login');
   
   // Credentials
@@ -68,6 +72,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Red Warning Confirmation Modal for Demo Data Mode
+  const [showDemoWarningModal, setShowDemoWarningModal] = useState(false);
+  const [pendingCredentials, setPendingCredentials] = useState<{ username: string; password?: string } | null>(null);
 
   // Google Drive state
   const [isGoogleProcessing, setIsGoogleProcessing] = useState(false);
@@ -285,59 +293,43 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setActiveTab('login');
   };
 
-  // Reset to local demo data
-  const handleUseLocalDemoData = () => {
-    if (onResetToDemoData) {
-      onResetToDemoData();
-    }
-    setSelectedFileId(null);
-    setSelectedFileName(null);
-    setSelectedFileUrl(null);
-    setIsPendingNewCompany(null);
-    setNewCompanySuccessNotice(null);
-    setSuccessMessage('Đã chuyển sang chế độ dữ liệu mẫu nội bộ (Offline).');
-    setTimeout(() => setSuccessMessage(null), 2500);
-    setActiveTab('login');
-  };
+  // Check if currently targeting demo data (no spreadsheet linked/selected)
+  const isTargetingDemo = !isPendingNewCompany && (!selectedFileId && !syncState.spreadsheetId || syncState.isDemoMode || localStorage.getItem('payroll_is_demo_mode') === 'true');
 
-  // Submit Login
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
+  // Actual login execution
+  const executeLogin = async (uname: string, pwd?: string, forceDemo?: boolean) => {
+    const isDemo = forceDemo ?? (
+      !isPendingNewCompany && (
+        (!selectedFileId && !syncState.spreadsheetId) || 
+        syncState.isDemoMode || 
+        localStorage.getItem('payroll_is_demo_mode') === 'true'
+      )
+    );
 
-    // If a Google sheet is selected, load latest data and system settings upon login
-    if (selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet) {
-      try {
-        await onLoadDataFromSpreadsheet(selectedFileId, selectedFileName || undefined);
-      } catch (err) {
-        console.warn('Lỗi nạp Google Sheet trước khi đăng nhập:', err);
-      }
-    }
+    if (isDemo) {
+      localStorage.setItem('payroll_is_demo_mode', 'true');
+      setSyncState(prev => ({
+        ...prev,
+        isDemoMode: true,
+        spreadsheetId: null,
+        spreadsheetName: null,
+        spreadsheetUrl: null,
+        syncMessage: 'Đang dùng dữ liệu mẫu nội bộ (Khóa đồng bộ Google Sheets)'
+      }));
+    } else {
+      localStorage.setItem('payroll_is_demo_mode', 'false');
+      setSyncState(prev => ({
+        ...prev,
+        isDemoMode: false
+      }));
 
-    const result = login(username, password);
-    if (!result.success) {
-      setErrorMessage(result.error || 'Đăng nhập không thành công!');
-      return;
-    }
-
-    setSuccessMessage('Đăng nhập thành công! Đang chuyển hướng vào hệ thống...');
-    setTimeout(() => {
-      setSuccessMessage(null);
-      if (onClose) onClose();
-    }, 600);
-  };
-
-  // 1-Click Quick Login
-  const handleQuickLogin = async (uname: string, pwd?: string) => {
-    setUsername(uname);
-    setPassword(pwd || '123');
-    setErrorMessage(null);
-
-    if (selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet) {
-      try {
-        await onLoadDataFromSpreadsheet(selectedFileId, selectedFileName || undefined);
-      } catch (err) {
-        console.warn('Lỗi nạp Google Sheet trước khi đăng nhập:', err);
+      // If a Google sheet is selected, load latest data and system settings upon login
+      if (selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet) {
+        try {
+          await onLoadDataFromSpreadsheet(selectedFileId, selectedFileName || undefined);
+        } catch (err) {
+          console.warn('Lỗi nạp Google Sheet trước khi đăng nhập:', err);
+        }
       }
     }
 
@@ -347,11 +339,118 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    setSuccessMessage(`Đăng nhập thành công với tài khoản "${uname}"!`);
+    setSuccessMessage(
+      isDemo 
+        ? 'Đăng nhập thành công với Dữ liệu mẫu nội bộ (Chế độ Demo - Đã khóa đồng bộ Sheets)!' 
+        : `Đăng nhập thành công với tài khoản "${uname}"!`
+    );
     setTimeout(() => {
       setSuccessMessage(null);
       if (onClose) onClose();
-    }, 500);
+    }, 600);
+  };
+
+  // Submit Login
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+
+    // If logging into demo data, validate credentials first and show red warning confirmation
+    if (isTargetingDemo) {
+      const cleanUsername = username.trim().toLowerCase();
+      const foundUser = users.find(u => 
+        u.username.toLowerCase() === cleanUsername || 
+        u.email.toLowerCase() === cleanUsername
+      );
+
+      if (!foundUser) {
+        setErrorMessage('Tên đăng nhập hoặc Email không tồn tại trong hệ thống!');
+        return;
+      }
+
+      if (foundUser.status === 'locked') {
+        setErrorMessage('Tài khoản này đã bị tạm khóa. Vui lòng liên hệ Quản trị viên!');
+        return;
+      }
+
+      if (foundUser.password && password !== undefined && foundUser.password !== password) {
+        setErrorMessage('Mật khẩu không chính xác. Vui lòng thử lại!');
+        return;
+      }
+
+      setPendingCredentials({ username, password });
+      setShowDemoWarningModal(true);
+      return;
+    }
+
+    await executeLogin(username, password);
+  };
+
+  // 1-Click Quick Login
+  const handleQuickLogin = async (uname: string, pwd?: string) => {
+    setUsername(uname);
+    setPassword(pwd || '123');
+    setErrorMessage(null);
+
+    if (isTargetingDemo) {
+      setPendingCredentials({ username: uname, password: pwd || '123' });
+      setShowDemoWarningModal(true);
+      return;
+    }
+
+    await executeLogin(uname, pwd || '123');
+  };
+
+  // Switch to local demo data from Google tab
+  const handleUseLocalDemoData = () => {
+    setPendingCredentials(null);
+    setShowDemoWarningModal(true);
+  };
+
+  // Dismiss Demo Warning (stay on login screen)
+  const handleDismissDemoWarning = () => {
+    setShowDemoWarningModal(false);
+  };
+
+  // Confirm Demo Login / Switch
+  const handleConfirmDemoLogin = async () => {
+    setShowDemoWarningModal(false);
+    localStorage.setItem('payroll_is_demo_mode', 'true');
+    setSyncState(prev => ({
+      ...prev,
+      isDemoMode: true,
+      spreadsheetId: null,
+      spreadsheetName: null,
+      spreadsheetUrl: null,
+      syncMessage: 'Đang dùng dữ liệu mẫu nội bộ (Khóa đồng bộ Google Sheets)'
+    }));
+    if (onResetToDemoData) {
+      onResetToDemoData();
+    }
+    setSelectedFileId(null);
+    setSelectedFileName(null);
+    setSelectedFileUrl(null);
+    setIsPendingNewCompany(null);
+    setNewCompanySuccessNotice(null);
+
+    if (pendingCredentials) {
+      await executeLogin(pendingCredentials.username, pendingCredentials.password, true);
+      setPendingCredentials(null);
+    } else {
+      setSuccessMessage('Đã chuyển sang chế độ Dữ liệu mẫu nội bộ (Khóa đồng bộ Google Sheets).');
+      setTimeout(() => setSuccessMessage(null), 2500);
+      setActiveTab('login');
+    }
+  };
+
+  // Cancel Demo Login
+  const handleCancelDemoLogin = () => {
+    setShowDemoWarningModal(false);
+    setPendingCredentials(null);
+    setActiveTab('google');
+    if (syncState.isConnected && driveFiles.length === 0) {
+      handleLoadDriveFiles();
+    }
   };
 
   // Filter drive files by search
@@ -397,9 +496,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <span className="max-w-[160px] truncate">{selectedFileName || syncState.spreadsheetName}</span>
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[11px] font-medium text-slate-600">
-                <Database className="w-3 h-3 text-slate-400" />
-                <span>Dữ liệu mẫu nội bộ</span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-50 border border-red-200 text-[11px] font-bold text-red-700">
+                <AlertTriangle className="w-3 h-3 text-red-600" />
+                <span>Dữ liệu mẫu nội bộ (Khóa đồng bộ Sheets)</span>
               </span>
             )}
           </div>
@@ -1035,6 +1134,123 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <span>Dữ liệu bảng lương được đồng bộ bảo mật trực tiếp trên Google Drive cá nhân của bạn.</span>
         </div>
       </div>
+
+      {/* RED WARNING CONFIRMATION MODAL FOR SAMPLE DATA (DỮ LIỆU MẪU NỘI BỘ) */}
+      {showDemoWarningModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/85 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border-2 border-red-500 overflow-hidden relative animate-in zoom-in-95 duration-200 flex flex-col my-auto max-h-[92vh]">
+            {/* Top Warning Strip */}
+            <div className="h-2.5 bg-gradient-to-r from-red-600 via-rose-600 to-amber-600" />
+
+            {/* Red Header */}
+            <div className="bg-gradient-to-r from-red-700 via-rose-800 to-red-900 p-5 sm:p-6 text-white relative">
+              <button
+                type="button"
+                onClick={handleDismissDemoWarning}
+                className="absolute top-4 right-4 p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                title="Đóng cảnh báo"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 bg-red-600/90 rounded-2xl border border-red-400 shadow-md animate-pulse shrink-0">
+                  <AlertTriangle className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <div className="inline-block px-2 py-0.5 rounded-full bg-red-500/60 text-[10px] font-black uppercase tracking-wider text-rose-100 mb-1 border border-red-400/40">
+                    Cảnh báo an toàn dữ liệu Google Sheets
+                  </div>
+                  <h3 className="text-base sm:text-xl font-black tracking-tight text-white leading-tight">
+                    CẢNH BÁO: ĐĂNG NHẬP DỮ LIỆU MẪU NỘI BỘ
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 space-y-4 overflow-y-auto">
+              {/* Red Alert Box */}
+              <div className="p-4 bg-red-50 border-2 border-red-300 rounded-2xl text-xs space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="font-extrabold text-sm text-red-900">
+                      Bạn đang chọn đăng nhập vào chế độ &quot;Dữ liệu mẫu nội bộ&quot;!
+                    </div>
+                    <p className="text-red-800 leading-relaxed text-xs">
+                      {pendingCredentials ? (
+                        <>
+                          Bạn đang chuẩn bị đăng nhập với tài khoản <strong className="font-mono bg-red-200/90 px-1.5 py-0.5 rounded text-red-950 font-bold">{pendingCredentials.username}</strong> vào cơ sở dữ liệu mẫu nội bộ (chưa liên kết với bảng tính Google Sheets của doanh nghiệp).
+                        </>
+                      ) : (
+                        <>
+                          Bạn đang chọn làm việc với cơ sở dữ liệu mẫu nội bộ độc lập (không liên kết với Google Sheets).
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Crucial Data Protection Rule */}
+                <div className="p-3.5 bg-white rounded-xl border border-red-200 space-y-2 text-slate-800 shadow-xs">
+                  <div className="font-bold text-red-700 flex items-center gap-1.5 text-xs">
+                    <Lock className="w-4 h-4 text-red-600 shrink-0" />
+                    <span>HỆ THỐNG SẼ KHÓA TOÀN BỘ ĐỒNG BỘ LÊN GOOGLE SHEETS:</span>
+                  </div>
+                  <ul className="list-disc pl-5 space-y-1.5 text-[11px] text-slate-700 leading-relaxed">
+                    <li>
+                      <strong>Tuyệt đối không cho phép đồng bộ dữ liệu lên Google Sheets</strong> trong suốt quá trình bạn sử dụng Dữ liệu mẫu nội bộ.
+                    </li>
+                    <li>
+                      Mục đích: <strong className="text-red-700">Tránh việc ghi sai hoặc ghi đè dữ liệu mẫu vào cơ sở dữ liệu đã kết nối trong Google Sheets</strong> của doanh nghiệp bạn.
+                    </li>
+                    <li>
+                      Mọi dữ liệu bảng lương, nhân sự, chấm công trong phiên này chỉ mang tính chất minh họa / dùng thử nghiệm nội bộ.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Confirmation Question */}
+              <div className="text-center font-bold text-slate-900 text-sm sm:text-base pt-1">
+                Bạn có chắc chắn muốn thực hiện đăng nhập vào Dữ liệu mẫu nội bộ hay không?
+              </div>
+
+              {/* Actions */}
+              <div className="space-y-2.5 pt-1">
+                {/* Button 1: Proceed with demo login (Red Warning Action) */}
+                <button
+                  type="button"
+                  onClick={handleConfirmDemoLogin}
+                  className="w-full py-3 px-4 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow-lg shadow-red-600/30 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Có, Xác nhận thực hiện (Khóa đồng bộ Sheets)</span>
+                </button>
+
+                {/* Button 2: Cancel & Switch to Google Sheets */}
+                <button
+                  type="button"
+                  onClick={handleCancelDemoLogin}
+                  className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm rounded-2xl border border-slate-300 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <Cloud className="w-4 h-4 text-blue-600" />
+                  <span>Hủy bỏ &amp; Chọn kết nối Google Sheets của công ty</span>
+                </button>
+
+                {/* Button 3: Dismiss dialog */}
+                <button
+                  type="button"
+                  onClick={handleDismissDemoWarning}
+                  className="w-full py-1.5 text-center text-xs text-slate-500 hover:text-slate-700 underline cursor-pointer"
+                >
+                  Đóng cảnh báo và quay lại form đăng nhập
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

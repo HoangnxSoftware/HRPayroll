@@ -349,9 +349,11 @@ function PayrollAppContent() {
     setTimekeepings(newData.timekeepings);
 
     if (spreadsheetInfo) {
+      localStorage.setItem('payroll_is_demo_mode', 'false');
       setSyncState(prev => ({
         ...prev,
         isConnected: true,
+        isDemoMode: false,
         spreadsheetId: spreadsheetInfo.id,
         spreadsheetName: spreadsheetInfo.title,
         spreadsheetUrl: spreadsheetInfo.url,
@@ -389,9 +391,11 @@ function PayrollAppContent() {
         if (fullData.timekeepings) {
           setTimekeepings(fullData.timekeepings);
         }
+        localStorage.setItem('payroll_is_demo_mode', 'false');
         setSyncState(prev => ({
           ...prev,
           isConnected: true,
+          isDemoMode: false,
           spreadsheetId,
           spreadsheetName: spreadsheetName || fullData.settings?.companyName || prev.spreadsheetName,
           spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
@@ -406,17 +410,19 @@ function PayrollAppContent() {
     }
   };
 
-  // Tự động đồng bộ từ Google Sheets nếu đã kết nối trước đó
+  // Tự động đồng bộ từ Google Sheets nếu đã kết nối trước đó (chỉ chạy khi không ở chế độ dữ liệu mẫu)
   useEffect(() => {
-    if (syncState.isConnected && syncState.spreadsheetId) {
+    const isDemo = syncState.isDemoMode || localStorage.getItem('payroll_is_demo_mode') === 'true';
+    if (!isDemo && syncState.isConnected && syncState.spreadsheetId) {
       handleLoadDataFromSpreadsheet(syncState.spreadsheetId, syncState.spreadsheetName || undefined).catch(err => {
         console.warn('Không thể tự động tải từ Google Sheets khi khởi động:', err);
       });
     }
-  }, [syncState.isConnected, syncState.spreadsheetId]);
+  }, [syncState.isConnected, syncState.spreadsheetId, syncState.isDemoMode]);
 
   // Handler: Reset to local demo data
   const handleResetToDemoData = () => {
+    localStorage.setItem('payroll_is_demo_mode', 'true');
     setSettings(INITIAL_SETTINGS);
     setEmployees(INITIAL_EMPLOYEES);
     setDependents(INITIAL_DEPENDENTS);
@@ -426,10 +432,11 @@ function PayrollAppContent() {
     setTimekeepings(INITIAL_TIMEKEEPINGS);
     setSyncState(prev => ({
       ...prev,
+      isDemoMode: true,
       spreadsheetId: null,
       spreadsheetName: null,
       spreadsheetUrl: null,
-      syncMessage: 'Đang dùng dữ liệu mẫu nội bộ.'
+      syncMessage: 'Đang dùng dữ liệu mẫu nội bộ (Khóa đồng bộ Google Sheets)'
     }));
   };
 

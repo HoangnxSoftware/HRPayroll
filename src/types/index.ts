@@ -532,4 +532,5 @@ export interface GoogleSyncState {
   isSyncing: boolean;
   syncMessage: string | null;
   syncSuccess: boolean;
+  isDemoMode?: boolean; // Chế độ dữ liệu mẫu nội bộ - khóa đồng bộ lên Google Sheets
 }

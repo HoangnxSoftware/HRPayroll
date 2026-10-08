@@ -318,6 +318,12 @@ export const exportDataToGoogleSheets = async (
   spreadsheetId: string,
   data: FullPayrollData
 ): Promise<{ totalUpdatedCells: number }> => {
+  // Ngăn chặn đồng bộ khi đang ở chế độ Dữ liệu mẫu nội bộ để bảo vệ Google Sheets
+  const isDemo = localStorage.getItem('payroll_is_demo_mode') === 'true';
+  if (isDemo) {
+    throw new Error('Hệ thống đang hoạt động ở chế độ "Dữ liệu mẫu nội bộ". Tính năng đồng bộ lên Google Sheets đã bị khóa nhằm tránh ghi đè dữ liệu mẫu vào cơ sở dữ liệu đã kết nối.');
+  }
+
   const token = await getAccessToken();
   if (!token) {
     throw new Error('Chưa có phiên truy cập Google hoặc phiên làm việc đã hết hạn. Vui lòng bấm "Đăng nhập Google" để cấp quyền đồng bộ.');

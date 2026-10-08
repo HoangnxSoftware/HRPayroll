@@ -82,13 +82,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <button
             onClick={onOpenSync}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-xs cursor-pointer transition-all border ${
-              syncState.isConnected
-                ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40 hover:bg-emerald-500/30'
-                : 'bg-amber-500/20 text-amber-200 border-amber-500/40 hover:bg-amber-500/30'
+              syncState.isDemoMode
+                ? 'bg-rose-500/20 text-rose-200 border-rose-500/40 hover:bg-rose-500/30'
+                : syncState.isConnected
+                  ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40 hover:bg-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-200 border-amber-500/40 hover:bg-amber-500/30'
             }`}
           >
-            <span className={`w-2 h-2 rounded-full ${syncState.isConnected ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
-            <span>{syncState.isConnected ? 'Google Sheets: Đã kết nối' : 'Kết nối Google Sheets / Drive'}</span>
+            <span className={`w-2 h-2 rounded-full ${syncState.isDemoMode ? 'bg-rose-400 ring-2 ring-rose-300/40' : syncState.isConnected ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+            <span>{syncState.isDemoMode ? 'Dữ liệu mẫu (Khóa đồng bộ Sheets)' : syncState.isConnected ? 'Google Sheets: Đã kết nối' : 'Kết nối Google Sheets / Drive'}</span>
             <ExternalLink className="w-3.5 h-3.5" />
           </button>
 

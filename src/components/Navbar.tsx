@@ -10,7 +10,9 @@ import {
   Menu,
   CheckCircle2,
   FileSpreadsheet,
-  LogIn
+  LogIn,
+  Lock,
+  AlertTriangle
 } from 'lucide-react';
 import { SystemSettings, GoogleSyncState, UserRole, Employee } from '../types';
 import { useAuthRole } from '../context/AuthRoleContext';
@@ -125,21 +127,29 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onOpenSync}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                syncState.isConnected
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                  : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                syncState.isDemoMode
+                  ? 'bg-red-50 text-red-800 border-red-300 hover:bg-red-100'
+                  : syncState.isConnected
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                    : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
               }`}
               title={
-                syncState.isConnected 
-                  ? `Google Sheets: ${syncState.spreadsheetName || syncState.userEmail}` 
-                  : 'Kết nối Google Sheets'
+                syncState.isDemoMode
+                  ? 'Dữ liệu mẫu nội bộ: Đã KHÓA đồng bộ Google Sheets để bảo vệ cơ sở dữ liệu'
+                  : syncState.isConnected 
+                    ? `Google Sheets: ${syncState.spreadsheetName || syncState.userEmail}` 
+                    : 'Kết nối Google Sheets'
               }
             >
-              <Cloud className="w-3.5 h-3.5" />
-              <span className="hidden md:inline max-w-[140px] truncate">
-                {syncState.isConnected ? (syncState.spreadsheetName || 'Google Sheets') : 'Lưu Google Drive'}
+              {syncState.isDemoMode ? <Lock className="w-3.5 h-3.5 text-red-600" /> : <Cloud className="w-3.5 h-3.5" />}
+              <span className="hidden md:inline max-w-[160px] truncate">
+                {syncState.isDemoMode 
+                  ? 'Dữ liệu mẫu (Khóa sync)' 
+                  : syncState.isConnected 
+                    ? (syncState.spreadsheetName || 'Google Sheets') 
+                    : 'Lưu Google Drive'}
               </span>
-              <span className={`w-2 h-2 rounded-full ${syncState.isConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+              <span className={`w-2 h-2 rounded-full ${syncState.isDemoMode ? 'bg-red-500 ring-2 ring-red-200' : syncState.isConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
             </button>
           )}
 
