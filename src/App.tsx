@@ -45,7 +45,7 @@ import { AnnualPayrollView } from './views/AnnualPayrollView';
 import { TaxReportView } from './views/TaxReportView';
 import { UserManagementView } from './views/UserManagementView';
 import { MyPayslipView } from './views/MyPayslipView';
-import { LoginModal } from './components/LoginModal';
+import { LoginModal, saveDatabaseConnectionToStorage } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { LogoutSyncConfirmModal } from './components/LogoutSyncConfirmModal';
 
@@ -217,12 +217,19 @@ function PayrollAppContent() {
     };
   });
 
-  // Tự động lưu trạng thái đồng bộ vào localStorage khi có thay đổi
+  // Tự động lưu trạng thái đồng bộ và lưu đường dẫn file cơ sở dữ liệu để phục vụ lần đăng nhập tiếp theo
   useEffect(() => {
     try {
       localStorage.setItem('payroll_google_sync_state', JSON.stringify(syncState));
     } catch (e) {
       console.warn('Lỗi lưu sync state:', e);
+    }
+    if (syncState.spreadsheetId && !syncState.isDemoMode) {
+      saveDatabaseConnectionToStorage({
+        id: syncState.spreadsheetId,
+        name: syncState.spreadsheetName,
+        url: syncState.spreadsheetUrl
+      });
     }
   }, [syncState]);
 
@@ -350,6 +357,11 @@ function PayrollAppContent() {
 
     if (spreadsheetInfo) {
       localStorage.setItem('payroll_is_demo_mode', 'false');
+      saveDatabaseConnectionToStorage({
+        id: spreadsheetInfo.id,
+        name: spreadsheetInfo.title,
+        url: spreadsheetInfo.url
+      });
       setSyncState(prev => ({
         ...prev,
         isConnected: true,
@@ -392,13 +404,20 @@ function PayrollAppContent() {
           setTimekeepings(fullData.timekeepings);
         }
         localStorage.setItem('payroll_is_demo_mode', 'false');
+        const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+        const sheetTitle = spreadsheetName || fullData.settings?.companyName || 'Bảng tính Google Sheets';
+        saveDatabaseConnectionToStorage({
+          id: spreadsheetId,
+          name: sheetTitle,
+          url: sheetUrl
+        });
         setSyncState(prev => ({
           ...prev,
           isConnected: true,
           isDemoMode: false,
           spreadsheetId,
           spreadsheetName: spreadsheetName || fullData.settings?.companyName || prev.spreadsheetName,
-          spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
+          spreadsheetUrl: sheetUrl,
           syncMessage: `Đã kết nối dữ liệu Google Sheets: ${spreadsheetName || spreadsheetId}`
         }));
         return true;
@@ -886,6 +905,13 @@ function PayrollAppContent() {
         payrollData={fullPayrollData}
         onDirectLogout={() => {
           setIsLogoutConfirmOpen(false);
+          if (syncState.spreadsheetId && !syncState.isDemoMode) {
+            saveDatabaseConnectionToStorage({
+              id: syncState.spreadsheetId,
+              name: syncState.spreadsheetName,
+              url: syncState.spreadsheetUrl
+            });
+          }
           logout();
         }}
         onOpenSyncModal={() => {

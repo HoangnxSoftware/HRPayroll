@@ -53,6 +53,64 @@ interface LoginModalProps {
   onResetToDemoData?: () => void;
 }
 
+// Thông tin lưu trữ đường dẫn file cơ sở dữ liệu đã kết nối
+export interface SavedDatabaseInfo {
+  id: string;
+  name: string;
+  url: string;
+  savedAt?: string;
+}
+
+// Helper: Đọc thông tin file cơ sở dữ liệu đã lưu từ lần thoát/đăng nhập trước đó
+export const getSavedDatabaseInfo = (): SavedDatabaseInfo | null => {
+  try {
+    const raw = localStorage.getItem('payroll_saved_database_info');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.id && (parsed.url || parsed.name)) {
+        return {
+          id: parsed.id,
+          name: parsed.name || 'Bảng tính Google Sheets',
+          url: parsed.url || `https://docs.google.com/spreadsheets/d/${parsed.id}/edit`,
+          savedAt: parsed.savedAt
+        };
+      }
+    }
+    const savedUrl = localStorage.getItem('payroll_saved_database_url');
+    if (savedUrl) {
+      const cleanId = extractSpreadsheetId(savedUrl);
+      if (cleanId) {
+        return {
+          id: cleanId,
+          name: 'Bảng tính đã kết nối trước đó',
+          url: savedUrl
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Lỗi đọc saved database info từ localStorage:', e);
+  }
+  return null;
+};
+
+// Helper: Lưu đường dẫn file cơ sở dữ liệu để phục vụ cho lần đăng nhập tiếp theo
+export const saveDatabaseConnectionToStorage = (info: { id: string; name?: string | null; url?: string | null }) => {
+  try {
+    if (!info.id) return;
+    const url = info.url || `https://docs.google.com/spreadsheets/d/${info.id}/edit`;
+    const payload: SavedDatabaseInfo = {
+      id: info.id,
+      name: info.name || 'Bảng tính Google Sheets',
+      url,
+      savedAt: new Date().toISOString()
+    };
+    localStorage.setItem('payroll_saved_database_info', JSON.stringify(payload));
+    localStorage.setItem('payroll_saved_database_url', url);
+  } catch (e) {
+    console.warn('Lỗi lưu saved database info vào localStorage:', e);
+  }
+};
+
 export const LoginModal: React.FC<LoginModalProps> = ({ 
   isOpen, 
   onClose, 
@@ -77,15 +135,31 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [showDemoWarningModal, setShowDemoWarningModal] = useState(false);
   const [pendingCredentials, setPendingCredentials] = useState<{ username: string; password?: string } | null>(null);
 
-  // Google Drive state
+  // Saved database info from previous login/exit
+  const savedDb = getSavedDatabaseInfo();
+
+  // Google Drive state: Khởi tạo với spreadsheet hiện tại HOẶC đường dẫn file đã lưu trước đó nếu không ở demo
   const [isGoogleProcessing, setIsGoogleProcessing] = useState(false);
   const [driveFiles, setDriveFiles] = useState<DriveSpreadsheetItem[]>([]);
   const [hrSalaryFolder, setHrSalaryFolder] = useState<DriveFolderInfo | null>(null);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [customSheetInput, setCustomSheetInput] = useState('');
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(syncState.spreadsheetId);
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(syncState.spreadsheetName || null);
-  const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(syncState.spreadsheetUrl || null);
+
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(() => {
+    if (syncState.spreadsheetId) return syncState.spreadsheetId;
+    if (!syncState.isDemoMode && savedDb?.id) return savedDb.id;
+    return null;
+  });
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(() => {
+    if (syncState.spreadsheetName) return syncState.spreadsheetName;
+    if (!syncState.isDemoMode && savedDb?.name) return savedDb.name;
+    return null;
+  });
+  const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(() => {
+    if (syncState.spreadsheetUrl) return syncState.spreadsheetUrl;
+    if (!syncState.isDemoMode && savedDb?.url) return savedDb.url;
+    return null;
+  });
 
   // Mode for new company creation
   const [showCreateCompanyForm, setShowCreateCompanyForm] = useState(false);
@@ -170,10 +244,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   // Select an existing spreadsheet from list
   const handleSelectSpreadsheet = (file: DriveSpreadsheetItem) => {
+    const fileUrl = file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`;
     setSelectedFileId(file.id);
     setSelectedFileName(file.name);
-    setSelectedFileUrl(file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`);
+    setSelectedFileUrl(fileUrl);
     setIsPendingNewCompany(null);
+    saveDatabaseConnectionToStorage({ id: file.id, name: file.name, url: fileUrl });
     setSuccessMessage(`Đã chọn bảng tính: ${file.name}`);
     setTimeout(() => setSuccessMessage(null), 2500);
   };
@@ -193,6 +269,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setSelectedFileName(details.title);
       setSelectedFileUrl(details.url);
       setIsPendingNewCompany(null);
+      saveDatabaseConnectionToStorage({ id: details.id, name: details.title, url: details.url });
       const msg = moved
         ? `Kết nối thành công "${details.title}" và đã tự động đưa vào thư mục HR-Salary!`
         : `Kết nối thành công "${details.title}" (nằm trong thư mục HR-Salary).`;
@@ -234,6 +311,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setSelectedFileUrl(res.url);
       setHrSalaryFolder(res.folder);
       setIsPendingNewCompany(res.cleanData);
+      saveDatabaseConnectionToStorage({ id: res.id, name: res.title, url: res.url });
 
       // Also apply right away to app if callback provided
       if (onApplyNewCompanyData) {
@@ -331,6 +409,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           console.warn('Lỗi nạp Google Sheet trước khi đăng nhập:', err);
         }
       }
+
+      // Lưu lại đường dẫn file cơ sở dữ liệu đã kết nối thành công để phục vụ các lần tiếp theo
+      const activeId = selectedFileId || syncState.spreadsheetId;
+      const activeName = selectedFileName || syncState.spreadsheetName;
+      const activeUrl = selectedFileUrl || syncState.spreadsheetUrl || (activeId ? `https://docs.google.com/spreadsheets/d/${activeId}/edit` : null);
+      if (activeId && activeUrl) {
+        saveDatabaseConnectionToStorage({ id: activeId, name: activeName, url: activeUrl });
+      }
     }
 
     const result = login(uname, pwd || '123');
@@ -348,6 +434,56 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setSuccessMessage(null);
       if (onClose) onClose();
     }, 600);
+  };
+
+  // Lưu đường dẫn file cơ sở dữ liệu hiện tại để phục vụ cho các lần đăng nhập tiếp theo
+  const saveCurrentDatabaseConnection = (override?: { id?: string | null; name?: string | null; url?: string | null }) => {
+    const id = override?.id !== undefined ? override.id : (selectedFileId || syncState.spreadsheetId);
+    const name = override?.name !== undefined ? override.name : (selectedFileName || syncState.spreadsheetName);
+    const url = override?.url !== undefined ? override.url : (selectedFileUrl || syncState.spreadsheetUrl || (id ? `https://docs.google.com/spreadsheets/d/${id}/edit` : null));
+
+    if (id && url) {
+      saveDatabaseConnectionToStorage({ id, name, url });
+    }
+  };
+
+  // Tự động lưu đường dẫn khi có thay đổi file cơ sở dữ liệu
+  useEffect(() => {
+    if (selectedFileId) {
+      const activeUrl = selectedFileUrl || syncState.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${selectedFileId}/edit`;
+      saveDatabaseConnectionToStorage({
+        id: selectedFileId,
+        name: selectedFileName || syncState.spreadsheetName || 'Bảng tính Google Sheets',
+        url: activeUrl
+      });
+    }
+  }, [selectedFileId, selectedFileName, selectedFileUrl]);
+
+  // Khi thoát cửa sổ đăng nhập: luôn đảm bảo lưu đường dẫn file cơ sở dữ liệu trước đó
+  useEffect(() => {
+    return () => {
+      saveCurrentDatabaseConnection();
+    };
+  }, [selectedFileId, selectedFileName, selectedFileUrl, syncState.spreadsheetId, syncState.spreadsheetUrl, syncState.spreadsheetName]);
+
+  // Thoát khỏi cửa sổ đăng nhập: luôn lưu thông tin file trước đó rồi mới đóng
+  const handleExitModal = () => {
+    saveCurrentDatabaseConnection();
+    if (onClose) onClose();
+  };
+
+  // Khôi phục lại đường dẫn file cơ sở dữ liệu đã lưu từ lần trước
+  const handleRestoreSavedDatabase = () => {
+    const saved = getSavedDatabaseInfo();
+    if (saved) {
+      setSelectedFileId(saved.id);
+      setSelectedFileName(saved.name);
+      setSelectedFileUrl(saved.url);
+      setIsPendingNewCompany(null);
+      saveDatabaseConnectionToStorage(saved);
+      setSuccessMessage(`Đã khôi phục đường dẫn cơ sở dữ liệu: "${saved.name}"`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    }
   };
 
   // Submit Login
@@ -464,13 +600,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         {/* Top Decorative Line */}
         <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-600" />
 
-        {/* Close button only when already authenticated */}
+        {/* Close button only when already authenticated - Lưu thông tin trước khi thoát */}
         {isAuthenticated && onClose && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleExitModal}
             className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
-            title="Đóng cửa sổ"
+            title="Đóng cửa sổ (Lưu đường dẫn cơ sở dữ liệu)"
           >
             <X className="w-5 h-5" />
           </button>
@@ -578,31 +714,82 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         {activeTab === 'login' && (
           <div className="space-y-4 overflow-y-auto pr-1">
             {/* Active Data Source Summary Card */}
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2.5 overflow-hidden">
-                <div className={`p-2 rounded-xl ${selectedFileName || syncState.spreadsheetId ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
-                  {selectedFileName || syncState.spreadsheetId ? <Cloud className="w-4 h-4" /> : <Database className="w-4 h-4" />}
-                </div>
-                <div className="truncate">
-                  <div className="text-[10px] uppercase font-bold text-slate-400">Nguồn dữ liệu làm việc</div>
-                  <div className="font-bold text-slate-800 truncate">
-                    {selectedFileName || syncState.spreadsheetName || 'Dữ liệu mẫu nội bộ'}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col gap-2 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5 overflow-hidden">
+                  <div className={`p-2 rounded-xl shrink-0 ${selectedFileName || syncState.spreadsheetId ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                    {selectedFileName || syncState.spreadsheetId ? <Cloud className="w-4 h-4" /> : <Database className="w-4 h-4" />}
+                  </div>
+                  <div className="truncate">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Nguồn dữ liệu làm việc</div>
+                    <div className="font-bold text-slate-800 truncate">
+                      {selectedFileName || syncState.spreadsheetName || 'Dữ liệu mẫu nội bộ'}
+                    </div>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('google');
+                    if (syncState.isConnected && driveFiles.length === 0) {
+                      handleLoadDriveFiles();
+                    }
+                  }}
+                  className="px-2.5 py-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-800 bg-white hover:bg-emerald-50 border border-emerald-300 rounded-lg transition-colors shrink-0 cursor-pointer shadow-2xs"
+                >
+                  Đổi / Tạo mới ➔
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab('google');
-                  if (syncState.isConnected && driveFiles.length === 0) {
-                    handleLoadDriveFiles();
-                  }
-                }}
-                className="px-2.5 py-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-800 bg-white hover:bg-emerald-50 border border-emerald-300 rounded-lg transition-colors shrink-0 cursor-pointer shadow-2xs"
-              >
-                Đổi / Tạo mới ➔
-              </button>
+
+              {/* Đường dẫn file cơ sở dữ liệu đã lưu / đang kết nối */}
+              {(selectedFileUrl || syncState.spreadsheetUrl) && (
+                <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between gap-2 text-[11px]">
+                  <div className="truncate flex items-center gap-1.5 text-slate-600">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="text-[10px] text-slate-400 shrink-0">Đường dẫn:</span>
+                    <span className="font-mono text-slate-600 truncate max-w-[260px] sm:max-w-[340px]" title={selectedFileUrl || syncState.spreadsheetUrl || ''}>
+                      {selectedFileUrl || syncState.spreadsheetUrl}
+                    </span>
+                  </div>
+                  <a
+                    href={selectedFileUrl || syncState.spreadsheetUrl || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1 shrink-0 text-[10px] hover:underline"
+                    title="Mở Google Spreadsheet trên tab mới"
+                  >
+                    <span>Mở link</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              )}
             </div>
+
+            {/* Khối gợi ý khôi phục: Nếu đang ở chế độ Dữ liệu mẫu nhưng trước đó đã có file cơ sở dữ liệu được lưu */}
+            {isTargetingDemo && savedDb && (
+              <div className="p-3 bg-blue-50/90 border border-blue-200 rounded-2xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                <div className="flex items-center gap-2.5 truncate">
+                  <div className="p-2 bg-blue-100 text-blue-700 rounded-xl shrink-0">
+                    <FileSpreadsheet className="w-4 h-4" />
+                  </div>
+                  <div className="truncate">
+                    <div className="text-[10px] uppercase font-bold text-blue-700">Đường dẫn cơ sở dữ liệu đã lưu trước đó:</div>
+                    <div className="font-bold text-slate-800 text-[11px] truncate">{savedDb.name}</div>
+                    <div className="text-[10px] text-slate-500 font-mono truncate max-w-[240px] sm:max-w-[300px]" title={savedDb.url}>
+                      {savedDb.url}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRestoreSavedDatabase}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
+                  title="Sử dụng lại cơ sở dữ liệu đã kết nối ở phiên trước"
+                >
+                  Dùng lại file này
+                </button>
+              </div>
+            )}
 
             {/* Login Form */}
             <form onSubmit={handleLoginSubmit} className="space-y-3.5">
@@ -997,24 +1184,43 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
 
               {/* Direct Link or ID input */}
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    placeholder="Dán link hoặc mã Spreadsheet ID..."
-                    value={customSheetInput}
-                    onChange={e => setCustomSheetInput(e.target.value)}
-                    className="w-full pl-3 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
+              <div className="space-y-1.5">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      placeholder="Dán link hoặc mã Spreadsheet ID..."
+                      value={customSheetInput}
+                      onChange={e => setCustomSheetInput(e.target.value)}
+                      className="w-full pl-3 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleConnectCustomSheet}
+                    disabled={!customSheetInput.trim() || isGoogleProcessing || !syncState.isConnected}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+                  >
+                    Kết nối
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleConnectCustomSheet}
-                  disabled={!customSheetInput.trim() || isGoogleProcessing || !syncState.isConnected}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-                >
-                  Kết nối
-                </button>
+
+                {savedDb && (
+                  <div className="flex items-center justify-between text-[11px] bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                    <span className="text-slate-600 truncate flex items-center gap-1.5">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span className="text-slate-400 text-[10px]">Đã lưu trước đó:</span>
+                      <strong className="text-slate-700 truncate max-w-[180px] sm:max-w-[240px]">{savedDb.name}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCustomSheetInput(savedDb.url)}
+                      className="text-blue-600 hover:text-blue-800 font-semibold underline text-[10px] shrink-0 cursor-pointer"
+                    >
+                      Dán link này
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* List of files on drive */}
@@ -1051,6 +1257,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-100">
                         {filteredFiles.map(file => {
                           const isSelected = selectedFileId === file.id;
+                          const isSavedFile = savedDb && savedDb.id === file.id;
                           return (
                             <div
                               key={file.id}
@@ -1067,6 +1274,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                                 <span className="text-[9px] px-1.5 py-0.5 bg-amber-100/90 text-amber-800 rounded font-semibold shrink-0">
                                   HR-Salary
                                 </span>
+                                {isSavedFile && !isSelected && (
+                                  <span className="text-[9px] px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded font-bold shrink-0">
+                                    Đã lưu trước đó
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
                                 {isSelected ? (

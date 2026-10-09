@@ -15,6 +15,7 @@ import {
 import { GoogleSyncState } from '../types';
 import { FullPayrollData, exportDataToGoogleSheets, getOrCreateSpreadsheet } from '../services/googleSheetsService';
 import { ensureGoogleAccessToken } from '../services/authService';
+import { saveDatabaseConnectionToStorage } from './LoginModal';
 
 interface LogoutSyncConfirmModalProps {
   isOpen: boolean;
@@ -80,6 +81,15 @@ export const LogoutSyncConfirmModal: React.FC<LogoutSyncConfirmModalProps> = ({
           spreadsheetName: sheetName,
           isConnected: true
         }));
+      }
+
+      // Lưu đường dẫn file cơ sở dữ liệu để phục vụ cho các lần đăng nhập tiếp theo
+      if (sheetId && sheetUrl) {
+        saveDatabaseConnectionToStorage({
+          id: sheetId,
+          name: sheetName || 'Bảng tính Google Sheets',
+          url: sheetUrl
+        });
       }
 
       setSyncStatusText('Đang đẩy 8 phân hệ dữ liệu lên Google Sheets...');
