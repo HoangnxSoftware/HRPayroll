@@ -41,8 +41,8 @@ export const MyPayslipView: React.FC<MyPayslipViewProps> = ({
   const currentPayroll = payrolls.find(p => p.employeeId === currentEmp?.id);
   const currentTk = timekeepings.find(t => t.employeeId === currentEmp?.id);
 
-  const dep = settings.departments.find(d => d.id === currentEmp?.departmentId)?.name || 'Chưa phân bổ';
-  const pos = settings.positions.find(p => p.id === currentEmp?.positionId)?.name || 'Chưa thiết lập';
+  const dep = (settings?.departments || []).find(d => d.id === currentEmp?.departmentId)?.name || 'Chưa phân bổ';
+  const pos = (settings?.positions || []).find(p => p.id === currentEmp?.positionId)?.name || 'Chưa thiết lập';
 
   if (!currentEmp || !currentPayroll) {
     return (

@@ -242,7 +242,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
               <span className="text-slate-600">Số phòng ban / chức danh:</span>
-              <span className="font-bold text-slate-800">{settings.departments.length} phòng / {settings.positions.length} chức vụ</span>
+              <span className="font-bold text-slate-800">{(settings?.departments || []).length} phòng / {(settings?.positions || []).length} chức vụ</span>
             </div>
           </div>
         </div>
@@ -304,8 +304,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {settings.departments.map(dep => {
-                const depEmps = employees.filter(e => e.departmentId === dep.id);
+              {(settings?.departments || []).map(dep => {
+                const depEmps = (employees || []).filter(e => e.departmentId === dep.id);
                 const depEmpIds = new Set(depEmps.map(e => e.id));
                 const depPayrolls = payrolls.filter(p => depEmpIds.has(p.employeeId));
                 const depBaseSum = depEmps.reduce((s, e) => s + e.baseSalary, 0);

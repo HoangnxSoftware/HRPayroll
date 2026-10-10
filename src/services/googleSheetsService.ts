@@ -1740,11 +1740,19 @@ export const importFullDataFromGoogleSheets = async (
     console.warn('Lỗi đọc BieuThue_TNCN:', err);
   }
 
+  // Đảm bảo danh mục phòng ban & chức vụ luôn là mảng hợp lệ
+  if (!Array.isArray(result.settings.departments) || result.settings.departments.length === 0) {
+    result.settings.departments = initialSettings.departments;
+  }
+  if (!Array.isArray(result.settings.positions) || result.settings.positions.length === 0) {
+    result.settings.positions = initialSettings.positions;
+  }
+
   // Tạo map tra cứu phòng ban & chức vụ cho danh sách nhân viên
-  const depNameToId = new Map(result.settings.departments.map(d => [d.name.toLowerCase(), d.id]));
-  const depCodeToId = new Map(result.settings.departments.map(d => [d.code.toLowerCase(), d.id]));
-  const posNameToId = new Map(result.settings.positions.map(p => [p.name.toLowerCase(), p.id]));
-  const posCodeToId = new Map(result.settings.positions.map(p => [p.code.toLowerCase(), p.id]));
+  const depNameToId = new Map((result.settings.departments || []).map(d => [d.name.toLowerCase(), d.id]));
+  const depCodeToId = new Map((result.settings.departments || []).map(d => [d.code.toLowerCase(), d.id]));
+  const posNameToId = new Map((result.settings.positions || []).map(p => [p.name.toLowerCase(), p.id]));
+  const posCodeToId = new Map((result.settings.positions || []).map(p => [p.code.toLowerCase(), p.id]));
   const defaultDepId = result.settings.departments[0]?.id || 'dep-kt';
   const defaultPosId = result.settings.positions[0]?.id || 'pos-nv';
 

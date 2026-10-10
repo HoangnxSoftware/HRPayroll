@@ -64,9 +64,9 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
   const [advanceModal, setAdvanceModal] = useState<{ id: string; name: string; amount: number } | null>(null);
   const [selectedEmpIds, setSelectedEmpIds] = useState<Set<string>>(new Set());
 
-  const empMap = new Map(employees.map(e => [e.id, e]));
-  const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
-  const posMap = new Map(settings.positions.map(p => [p.id, p.name]));
+  const empMap = new Map((employees || []).map(e => [e.id, e]));
+  const depMap = new Map((settings?.departments || []).map(d => [d.id, d.name]));
+  const posMap = new Map((settings?.positions || []).map(p => [p.id, p.name]));
 
   // Tập hợp các số CCCD bị trùng lặp giữa các nhân viên khác nhau
   const duplicateIdCards = useMemo(() => {
@@ -266,7 +266,7 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
               className="w-full px-3 py-2 border border-slate-300 rounded-lg"
             >
               <option value="all">Tất cả phòng ban</option>
-              {settings.departments.map(d => (
+              {(settings?.departments || []).map(d => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>

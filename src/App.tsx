@@ -23,6 +23,15 @@ import {
 import { calculateEmployeePayroll, isEmployeeActiveInMonth } from './utils/payrollCalculator';
 import { FullPayrollData, importFullDataFromGoogleSheets } from './services/googleSheetsService';
 import { getCurrentUser } from './services/authService';
+import {
+  sanitizeSettings,
+  sanitizeEmployees,
+  sanitizeDependents,
+  sanitizeInsurances,
+  sanitizeMealRegistrations,
+  sanitizeSpecialAllowances,
+  sanitizeTimekeepings
+} from './utils/sanitizeData';
 
 import { AuthRoleProvider, useAuthRole } from './context/AuthRoleContext';
 import { Navbar } from './components/Navbar';
@@ -48,6 +57,7 @@ import { MyPayslipView } from './views/MyPayslipView';
 import { LoginModal, saveDatabaseConnectionToStorage } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { LogoutSyncConfirmModal } from './components/LogoutSyncConfirmModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function PayrollAppContent() {
   const { currentUser, isAuthenticated, currentUserRole, logout } = useAuthRole();
@@ -68,16 +78,17 @@ function PayrollAppContent() {
   const [settings, setSettings] = useState<SystemSettings>(() => {
     try {
       const saved = localStorage.getItem('payroll_system_settings');
-      let current = saved ? { ...INITIAL_SETTINGS, ...JSON.parse(saved) } : { ...INITIAL_SETTINGS };
+      let current = saved ? JSON.parse(saved) : null;
+      const sanitized = sanitizeSettings(current);
       const savedAddress = localStorage.getItem('payroll_company_address');
       if (savedAddress && savedAddress.trim()) {
-        current.address = savedAddress.trim();
+        sanitized.address = savedAddress.trim();
       }
       const savedPhone = localStorage.getItem('payroll_company_phone');
       if (savedPhone && savedPhone.trim() && savedPhone !== 'capped' && savedPhone !== 'fully_exempt') {
-        current.phoneNumber = savedPhone.trim();
+        sanitized.phoneNumber = savedPhone.trim();
       }
-      return current;
+      return sanitized;
     } catch (e) {
       console.warn('Lỗi đọc settings từ localStorage:', e);
     }
@@ -87,7 +98,7 @@ function PayrollAppContent() {
   const [employees, setEmployees] = useState<Employee[]>(() => {
     try {
       const saved = localStorage.getItem('payroll_employees_data');
-      if (saved) return JSON.parse(saved);
+      if (saved) return sanitizeEmployees(JSON.parse(saved));
     } catch (e) {
       console.warn('Lỗi đọc employees từ localStorage:', e);
     }
@@ -97,7 +108,7 @@ function PayrollAppContent() {
   const [dependents, setDependents] = useState<Dependent[]>(() => {
     try {
       const saved = localStorage.getItem('payroll_dependents_data');
-      if (saved) return JSON.parse(saved);
+      if (saved) return sanitizeDependents(JSON.parse(saved));
     } catch (e) {
       console.warn('Lỗi đọc dependents từ localStorage:', e);
     }
@@ -107,7 +118,7 @@ function PayrollAppContent() {
   const [insurances, setInsurances] = useState<InsuranceRecord[]>(() => {
     try {
       const saved = localStorage.getItem('payroll_insurances_data');
-      if (saved) return JSON.parse(saved);
+      if (saved) return sanitizeInsurances(JSON.parse(saved));
     } catch (e) {
       console.warn('Lỗi đọc insurances từ localStorage:', e);
     }
@@ -117,7 +128,7 @@ function PayrollAppContent() {
   const [mealRegistrations, setMealRegistrations] = useState<MealRegistration[]>(() => {
     try {
       const saved = localStorage.getItem('payroll_meals_data');
-      if (saved) return JSON.parse(saved);
+      if (saved) return sanitizeMealRegistrations(JSON.parse(saved));
     } catch (e) {
       console.warn('Lỗi đọc meals từ localStorage:', e);
     }
@@ -127,7 +138,7 @@ function PayrollAppContent() {
   const [specialAllowances, setSpecialAllowances] = useState<SpecialAllowance[]>(() => {
     try {
       const saved = localStorage.getItem('payroll_allowances_data');
-      if (saved) return JSON.parse(saved);
+      if (saved) return sanitizeSpecialAllowances(JSON.parse(saved));
     } catch (e) {
       console.warn('Lỗi đọc allowances từ localStorage:', e);
     }
@@ -137,7 +148,7 @@ function PayrollAppContent() {
   const [timekeepings, setTimekeepings] = useState<TimekeepingRecord[]>(() => {
     try {
       const saved = localStorage.getItem('payroll_timekeepings_data');
-      if (saved) return JSON.parse(saved);
+      if (saved) return sanitizeTimekeepings(JSON.parse(saved));
     } catch (e) {
       console.warn('Lỗi đọc timekeepings từ localStorage:', e);
     }
@@ -333,13 +344,13 @@ function PayrollAppContent() {
 
   // Handler: Import Data from Google Sheets
   const handleDataImported = (imported: Partial<FullPayrollData>) => {
-    if (imported.settings) setSettings(imported.settings);
-    if (imported.employees && imported.employees.length > 0) setEmployees(imported.employees);
-    if (imported.dependents) setDependents(imported.dependents);
-    if (imported.insurances) setInsurances(imported.insurances);
-    if (imported.mealRegistrations) setMealRegistrations(imported.mealRegistrations);
-    if (imported.specialAllowances) setSpecialAllowances(imported.specialAllowances);
-    if (imported.timekeepings) setTimekeepings(imported.timekeepings);
+    if (imported.settings) setSettings(sanitizeSettings(imported.settings));
+    if (imported.employees) setEmployees(sanitizeEmployees(imported.employees));
+    if (imported.dependents) setDependents(sanitizeDependents(imported.dependents));
+    if (imported.insurances) setInsurances(sanitizeInsurances(imported.insurances));
+    if (imported.mealRegistrations) setMealRegistrations(sanitizeMealRegistrations(imported.mealRegistrations));
+    if (imported.specialAllowances) setSpecialAllowances(sanitizeSpecialAllowances(imported.specialAllowances));
+    if (imported.timekeepings) setTimekeepings(sanitizeTimekeepings(imported.timekeepings));
   };
 
   // Handler: Apply new company clean blank database
@@ -347,13 +358,13 @@ function PayrollAppContent() {
     newData: FullPayrollData,
     spreadsheetInfo?: { id: string; url: string; title: string }
   ) => {
-    setSettings(newData.settings);
-    setEmployees(newData.employees);
-    setDependents(newData.dependents);
-    setInsurances(newData.insurances);
-    setMealRegistrations(newData.mealRegistrations);
-    setSpecialAllowances(newData.specialAllowances);
-    setTimekeepings(newData.timekeepings);
+    setSettings(sanitizeSettings(newData.settings));
+    setEmployees(sanitizeEmployees(newData.employees));
+    setDependents(sanitizeDependents(newData.dependents));
+    setInsurances(sanitizeInsurances(newData.insurances));
+    setMealRegistrations(sanitizeMealRegistrations(newData.mealRegistrations));
+    setSpecialAllowances(sanitizeSpecialAllowances(newData.specialAllowances));
+    setTimekeepings(sanitizeTimekeepings(newData.timekeepings));
 
     if (spreadsheetInfo) {
       localStorage.setItem('payroll_is_demo_mode', 'false');
@@ -383,25 +394,25 @@ function PayrollAppContent() {
       const fullData = await importFullDataFromGoogleSheets(spreadsheetId);
       if (fullData) {
         if (fullData.settings) {
-          setSettings(fullData.settings);
+          setSettings(sanitizeSettings(fullData.settings));
         }
         if (fullData.employees) {
-          setEmployees(fullData.employees);
+          setEmployees(sanitizeEmployees(fullData.employees));
         }
         if (fullData.dependents) {
-          setDependents(fullData.dependents);
+          setDependents(sanitizeDependents(fullData.dependents));
         }
         if (fullData.insurances) {
-          setInsurances(fullData.insurances);
+          setInsurances(sanitizeInsurances(fullData.insurances));
         }
         if (fullData.mealRegistrations) {
-          setMealRegistrations(fullData.mealRegistrations);
+          setMealRegistrations(sanitizeMealRegistrations(fullData.mealRegistrations));
         }
         if (fullData.specialAllowances) {
-          setSpecialAllowances(fullData.specialAllowances);
+          setSpecialAllowances(sanitizeSpecialAllowances(fullData.specialAllowances));
         }
         if (fullData.timekeepings) {
-          setTimekeepings(fullData.timekeepings);
+          setTimekeepings(sanitizeTimekeepings(fullData.timekeepings));
         }
         localStorage.setItem('payroll_is_demo_mode', 'false');
         const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
@@ -925,8 +936,10 @@ function PayrollAppContent() {
 
 export default function App() {
   return (
-    <AuthRoleProvider>
-      <PayrollAppContent />
-    </AuthRoleProvider>
+    <ErrorBoundary>
+      <AuthRoleProvider>
+        <PayrollAppContent />
+      </AuthRoleProvider>
+    </ErrorBoundary>
   );
 }

@@ -19,8 +19,6 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
   employees,
   settings,
 }) => {
-  if (!isOpen) return null;
-
   const empMap = new Map(employees.map(e => [e.id, e]));
   const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
 
@@ -157,6 +155,8 @@ export const PrintDependentsModal: React.FC<PrintDependentsModalProps> = ({
     });
     return dupSet;
   }, [dependents]);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto">

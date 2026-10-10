@@ -36,8 +36,6 @@ export const EditTaxBracketsModal: React.FC<EditTaxBracketsModalProps> = ({
   payrolls,
   onSave
 }) => {
-  if (!isOpen) return null;
-
   // Clone existing brackets or use default (5 brackets)
   const [brackets, setBrackets] = useState<TaxBracket[]>(() => {
     const existing = settings.taxBrackets;
@@ -190,6 +188,8 @@ export const EditTaxBracketsModal: React.FC<EditTaxBracketsModalProps> = ({
     onSave(brackets);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 overflow-y-auto">

@@ -68,8 +68,6 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
   periodOverride = null,
   insurances = [],
 }) => {
-  if (!isOpen) return null;
-
   // Active view: 'print' (in hàng loạt) hoặc 'template' (chỉnh sửa mẫu)
   const [activeTab, setActiveTab] = useState<'print' | 'template'>('print');
   
@@ -479,6 +477,8 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
   };
 
   const sampleEmployee = employees[previewEmployeeIndex] || employees[0];
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto print:p-0 print:m-0 print:bg-white print:static print:overflow-visible print:block print:h-auto print:max-h-none print:w-full print:inset-auto">

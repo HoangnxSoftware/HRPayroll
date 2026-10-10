@@ -292,9 +292,9 @@ export const PrintSlipModal: React.FC<PrintSlipModalProps> = ({
 }) => {
   const printAreaRef = useRef<HTMLDivElement>(null);
 
-  const empPayrollMap = useMemo(() => new Map(payrolls.map(p => [p.employeeId, p])), [payrolls]);
-  const depMap = useMemo(() => new Map(settings.departments.map(d => [d.id, d.name])), [settings.departments]);
-  const posMap = useMemo(() => new Map(settings.positions.map(p => [p.id, p.name])), [settings.positions]);
+  const empPayrollMap = useMemo(() => new Map((payrolls || []).map(p => [p.employeeId, p])), [payrolls]);
+  const depMap = useMemo(() => new Map((settings?.departments || []).map(d => [d.id, d.name])), [settings?.departments]);
+  const posMap = useMemo(() => new Map((settings?.positions || []).map(p => [p.id, p.name])), [settings?.positions]);
 
   // Danh sách các nhân viên có dữ liệu bảng lương trong tháng
   const availableEmployees = useMemo(() => {
@@ -585,8 +585,8 @@ export const PrintSlipModal: React.FC<PrintSlipModalProps> = ({
                       onChange={e => setFilterDep(e.target.value)}
                       className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                     >
-                      <option value="all">Tất cả phòng ban ({settings.departments.length})</option>
-                      {settings.departments.map(d => (
+                      <option value="all">Tất cả phòng ban ({(settings?.departments || []).length})</option>
+                      {(settings?.departments || []).map(d => (
                         <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
                     </select>

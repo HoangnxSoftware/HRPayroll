@@ -29,8 +29,6 @@ export const EditTaxExemptionModal: React.FC<EditTaxExemptionModalProps> = ({
   settings,
   onSave
 }) => {
-  if (!isOpen) return null;
-
   const [rules, setRules] = useState<TaxExemptionRules>(() => {
     return settings.taxExemptionRules 
       ? JSON.parse(JSON.stringify(settings.taxExemptionRules))
@@ -45,6 +43,8 @@ export const EditTaxExemptionModal: React.FC<EditTaxExemptionModalProps> = ({
     onSave(rules);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 overflow-y-auto">

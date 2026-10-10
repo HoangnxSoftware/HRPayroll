@@ -175,8 +175,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   // Search filter for Drive files
   const [fileSearchQuery, setFileSearchQuery] = useState('');
 
-  if (!isOpen) return null;
-
   // Load drive files when switching to google tab or when connected
   // ONLY spreadsheets inside the HR-Salary folder will be listed
   const handleLoadDriveFiles = async () => {
@@ -401,8 +399,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         isDemoMode: false
       }));
 
-      // If a Google sheet is selected, load latest data and system settings upon login
-      if (selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet) {
+      // If a Google sheet is selected and user is connected, load latest data and system settings upon login
+      if (syncState.isConnected && selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet) {
         try {
           await onLoadDataFromSpreadsheet(selectedFileId, selectedFileName || undefined);
         } catch (err) {
@@ -593,6 +591,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const filteredFiles = driveFiles.filter(f => 
     f.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
   );
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-3 sm:p-4 backdrop-blur-xs animate-in fade-in duration-200 overflow-y-auto">

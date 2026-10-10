@@ -34,8 +34,6 @@ export const PrintAnnualPayrollModal: React.FC<PrintAnnualPayrollModalProps> = (
   year,
   settings,
 }) => {
-  if (!isOpen) return null;
-
   const handlePrint = () => {
     window.print();
   };
@@ -185,6 +183,8 @@ export const PrintAnnualPayrollModal: React.FC<PrintAnnualPayrollModalProps> = (
     XLSX.utils.book_append_sheet(wb, ws, `Luong_Ca_Nam_${year}`);
     XLSX.writeFile(wb, `Bao_Cao_Luong_Toan_Bo_Lao_Dong_Nam_${year}.xlsx`);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print:p-0 print:bg-white">
