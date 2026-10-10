@@ -44,6 +44,7 @@ import { exportTimekeepingToExcel, exportMealAttendanceToExcel, exportOvertimeLo
 import { recalculateTimekeepingSummary, isEmployeeActiveInMonth, isMonthTimekept, getAvailableYears, getEffectiveWorkRecordForMonth } from '../utils/payrollCalculator';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintTimekeepingModal } from '../components/PrintTimekeepingModal';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { 
   WORK_SHIFTS, 
   SHIFT_MAP, 
@@ -314,11 +315,37 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
     return sum + Object.values(t.days || {}).filter(d => d.shift === 'ca_3').length;
   }, 0);
 
+  const [confirmModalState, setConfirmModalState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    isDanger?: boolean;
+    confirmLabel?: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
+
   // Tự động chấm công nhanh cả tháng
   const handleAutoFillMonth = () => {
     const activeEmps = employees.filter(e => isEmployeeActiveInMonth(e, month, year));
-    if (!confirm(`Bạn có chắc chắn muốn Tự động chấm công chuẩn cho toàn bộ ${activeEmps.length} nhân viên trong tháng ${month}/${year}? Các ngày trong tuần sẽ được gán ca và chấm 'X', Chủ nhật chấm nghỉ tuần, Ngày Lễ chấm 'L'.`)) return;
+    setConfirmModalState({
+      isOpen: true,
+      title: 'Tự Động Chấm Công Chuẩn Cả Tháng',
+      message: `Bạn có chắc chắn muốn Tự động chấm công chuẩn cho toàn bộ ${activeEmps.length} nhân viên trong tháng ${month}/${year}? Các ngày trong tuần sẽ được gán ca và chấm 'X', Chủ nhật chấm nghỉ tuần, Ngày Lễ chấm 'L'.`,
+      isDanger: false,
+      confirmLabel: 'Thực Hiện Chấm Công',
+      onConfirm: () => {
+        executeAutoFillMonth(activeEmps);
+        setConfirmModalState(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
 
+  const executeAutoFillMonth = (activeEmps: Employee[]) => {
     const holidayDates = new Set(settings.holidays.map(h => h.date));
 
     const newRecords: TimekeepingRecord[] = activeEmps.map(emp => {
@@ -830,8 +857,20 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
   const handleApplyMonthlyMealPlanToEntireMonth = () => {
     if (!canEditTimekeeping) return;
     const activeEmps = employees.filter(e => isEmployeeActiveInMonth(e, month, year));
-    if (!confirm(`Bạn có chắc chắn muốn Tự động tích chọn suất ăn (Trưa/Chiều/Tối) theo Đăng ký tháng cho toàn bộ nhân viên vào các ngày đi làm (công X, X/2, CT) trong tháng ${month}/${year}?`)) return;
+    setConfirmModalState({
+      isOpen: true,
+      title: 'Tự Động Chọn Suất Ăn Cả Tháng',
+      message: `Bạn có chắc chắn muốn Tự động tích chọn suất ăn (Trưa/Chiều/Tối) theo Đăng ký tháng cho toàn bộ nhân viên vào các ngày đi làm (công X, X/2, CT) trong tháng ${month}/${year}?`,
+      isDanger: false,
+      confirmLabel: 'Áp Dụng Suất Ăn',
+      onConfirm: () => {
+        executeApplyMonthlyMealPlan(activeEmps);
+        setConfirmModalState(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
 
+  const executeApplyMonthlyMealPlan = (activeEmps: Employee[]) => {
     const newTks = activeEmps.map(emp => {
       const tk = getEmployeeTimekeeping(emp.id);
       const empMealReg = mealRegistrations?.find(m => m.employeeId === emp.id && (m.month === monthKey || !m.month));
@@ -3247,6 +3286,16 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
         customMonth={month}
         customYear={year}
         initialMode={printModalMode}
+      />
+
+      <ConfirmModal
+        isOpen={confirmModalState.isOpen}
+        title={confirmModalState.title}
+        message={confirmModalState.message}
+        isDanger={confirmModalState.isDanger}
+        confirmLabel={confirmModalState.confirmLabel}
+        onConfirm={confirmModalState.onConfirm}
+        onCancel={() => setConfirmModalState(prev => ({ ...prev, isOpen: false }))}
       />
     </div>
   );

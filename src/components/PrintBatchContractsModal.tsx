@@ -33,6 +33,7 @@ import {
   resetCommitmentTemplate,
   numberToWordsVietnamese
 } from '../utils/documentTemplates';
+import { ConfirmModal } from './ConfirmModal';
 
 export type DocumentType = 'contract' | 'commitment' | 'both';
 
@@ -107,6 +108,7 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
   const [editingDocType, setEditingDocType] = useState<'contract' | 'commitment'>('contract');
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const [previewEmployeeIndex, setPreviewEmployeeIndex] = useState(0);
+  const [confirmResetModal, setConfirmResetModal] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -334,10 +336,11 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
 
   // Reset to default
   const handleResetTemplate = () => {
-    const isContract = editingDocType === 'contract';
-    const confirmMsg = `Bạn có chắc chắn muốn khôi phục lại mẫu ${isContract ? 'Hợp đồng lao động' : 'Bản cam kết thu nhập'} chuẩn mặc định? Mọi tùy chỉnh trước đó sẽ bị xóa.`;
-    if (!window.confirm(confirmMsg)) return;
+    setConfirmResetModal(true);
+  };
 
+  const executeResetTemplate = () => {
+    const isContract = editingDocType === 'contract';
     if (isContract) {
       const reset = resetContractTemplate();
       setContractTemplate(reset);
@@ -348,6 +351,7 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
 
     setSaveNotice('Đã khôi phục về mẫu chuẩn của hệ thống!');
     setTimeout(() => setSaveNotice(null), 3500);
+    setConfirmResetModal(false);
   };
 
   const handlePrint = () => {
@@ -1152,6 +1156,16 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
         </div>,
         document.body
       )}
+
+      <ConfirmModal
+        isOpen={confirmResetModal}
+        title="Khôi Phục Mẫu Mặc Định"
+        message={`Bạn có chắc chắn muốn khôi phục lại mẫu ${editingDocType === 'contract' ? 'Hợp đồng lao động' : 'Bản cam kết thu nhập'} chuẩn mặc định? Mọi tùy chỉnh trước đó sẽ bị xóa.`}
+        isDanger={true}
+        confirmLabel="Khôi Phục Mẫu"
+        onConfirm={executeResetTemplate}
+        onCancel={() => setConfirmResetModal(false)}
+      />
     </div>
   );
 };

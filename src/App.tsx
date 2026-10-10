@@ -57,6 +57,7 @@ import { MyPayslipView } from './views/MyPayslipView';
 import { LoginModal, saveDatabaseConnectionToStorage } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { LogoutSyncConfirmModal } from './components/LogoutSyncConfirmModal';
+import { ConfirmModal } from './components/ConfirmModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 function PayrollAppContent() {
@@ -66,6 +67,17 @@ function PayrollAppContent() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
+  const [deleteConfirmState, setDeleteConfirmState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
 
   // Auto redirect employee to my_payslip
   useEffect(() => {
@@ -494,13 +506,22 @@ function PayrollAppContent() {
   };
 
   const handleDeleteEmployee = (id: string) => {
-    if (!confirm('Bạn có chắc chắn muốn xóa nhân viên này khỏi hệ thống?')) return;
-    setEmployees(prev => prev.filter(e => e.id !== id));
-    setTimekeepings(prev => prev.filter(t => t.employeeId !== id));
-    setInsurances(prev => prev.filter(i => i.employeeId !== id));
-    setMealRegistrations(prev => prev.filter(m => m.employeeId !== id));
-    setDependents(prev => prev.filter(d => d.employeeId !== id));
-    setSpecialAllowances(prev => prev.filter(a => a.employeeId !== id));
+    const emp = employees.find(e => e.id === id);
+    const empName = emp ? `${emp.fullName} (${emp.employeeCode})` : 'nhân viên này';
+    setDeleteConfirmState({
+      isOpen: true,
+      title: 'Xác Nhận Xóa Nhân Viên',
+      message: `Bạn có chắc chắn muốn xóa nhân viên "${empName}" khỏi hệ thống? Thao tác này sẽ đồng thời xóa toàn bộ dữ liệu chấm công, bảo hiểm, ăn ca, người phụ thuộc và phụ cấp liên quan.`,
+      onConfirm: () => {
+        setEmployees(prev => prev.filter(e => e.id !== id));
+        setTimekeepings(prev => prev.filter(t => t.employeeId !== id));
+        setInsurances(prev => prev.filter(i => i.employeeId !== id));
+        setMealRegistrations(prev => prev.filter(m => m.employeeId !== id));
+        setDependents(prev => prev.filter(d => d.employeeId !== id));
+        setSpecialAllowances(prev => prev.filter(a => a.employeeId !== id));
+        setDeleteConfirmState(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   const handleImportEmployees = (imported: Partial<Employee>[]) => {
@@ -539,8 +560,17 @@ function PayrollAppContent() {
   const handleBatchAddDependents = (newDeps: Dependent[]) => setDependents(prev => [...prev, ...newDeps]);
   const handleUpdateDependent = (dep: Dependent) => setDependents(prev => prev.map(d => d.id === dep.id ? dep : d));
   const handleDeleteDependent = (id: string) => {
-    if (!confirm('Bạn có chắc chắn muốn xóa người phụ thuộc này?')) return;
-    setDependents(prev => prev.filter(d => d.id !== id));
+    const dep = dependents.find(d => d.id === id);
+    const depName = dep ? dep.fullName : 'người phụ thuộc này';
+    setDeleteConfirmState({
+      isOpen: true,
+      title: 'Xác Nhận Xóa Người Phụ Thuộc',
+      message: `Bạn có chắc chắn muốn xóa người phụ thuộc "${depName}" khỏi hệ thống?`,
+      onConfirm: () => {
+        setDependents(prev => prev.filter(d => d.id !== id));
+        setDeleteConfirmState(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   // Insurance update
@@ -584,8 +614,17 @@ function PayrollAppContent() {
   const handleBatchAddAllowances = (newAllowances: SpecialAllowance[]) => setSpecialAllowances(prev => [...prev, ...newAllowances]);
   const handleUpdateAllowance = (a: SpecialAllowance) => setSpecialAllowances(prev => prev.map(item => item.id === a.id ? a : item));
   const handleDeleteAllowance = (id: string) => {
-    if (!confirm('Bạn có chắc muốn xóa khoản phụ cấp này?')) return;
-    setSpecialAllowances(prev => prev.filter(item => item.id !== id));
+    const item = specialAllowances.find(a => a.id === id);
+    const itemName = item ? item.name : 'khoản phụ cấp này';
+    setDeleteConfirmState({
+      isOpen: true,
+      title: 'Xác Nhận Xóa Phụ Cấp',
+      message: `Bạn có chắc muốn xóa khoản phụ cấp "${itemName}"?`,
+      onConfirm: () => {
+        setSpecialAllowances(prev => prev.filter(item => item.id !== id));
+        setDeleteConfirmState(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   // Timekeeping updates
@@ -929,6 +968,14 @@ function PayrollAppContent() {
           setIsLogoutConfirmOpen(false);
           setIsSyncModalOpen(true);
         }}
+      />
+
+      <ConfirmModal
+        isOpen={deleteConfirmState.isOpen}
+        title={deleteConfirmState.title}
+        message={deleteConfirmState.message}
+        onConfirm={deleteConfirmState.onConfirm}
+        onCancel={() => setDeleteConfirmState(prev => ({ ...prev, isOpen: false }))}
       />
     </div>
   );

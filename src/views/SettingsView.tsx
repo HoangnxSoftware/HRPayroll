@@ -27,6 +27,7 @@ import { formatVND, calculateStandardDaysFromPolicy, DEFAULT_TAX_BRACKETS, DEFAU
 import { useAuthRole } from '../context/AuthRoleContext';
 import { EditTaxBracketsModal } from '../components/EditTaxBracketsModal';
 import { EditTaxExemptionModal } from '../components/EditTaxExemptionModal';
+import { ConfirmModal } from '../components/ConfirmModal';
 
 
 interface SettingsViewProps {
@@ -117,9 +118,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
     setNewDep({ code: '', name: '', managerName: '', description: '' });
   };
 
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
+
   const handleDeleteDepartment = (id: string) => {
-    if (!confirm('Bạn có chắc chắn muốn xóa phòng ban này?')) return;
-    setFormData(prev => ({ ...prev, departments: prev.departments.filter(d => d.id !== id) }));
+    const dep = formData.departments.find(d => d.id === id);
+    const depName = dep ? dep.name : 'phòng ban này';
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Xác Nhận Xóa Phòng Ban',
+      message: `Bạn có chắc chắn muốn xóa phòng ban "${depName}"?`,
+      onConfirm: () => {
+        setFormData(prev => ({ ...prev, departments: prev.departments.filter(d => d.id !== id) }));
+        setDeleteConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   const handleAddPosition = () => {
@@ -138,8 +160,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   };
 
   const handleDeletePosition = (id: string) => {
-    if (!confirm('Bạn có chắc chắn muốn xóa chức vụ này?')) return;
-    setFormData(prev => ({ ...prev, positions: prev.positions.filter(p => p.id !== id) }));
+    const pos = formData.positions.find(p => p.id === id);
+    const posName = pos ? pos.name : 'chức vụ này';
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Xác Nhận Xóa Chức Vụ',
+      message: `Bạn có chắc chắn muốn xóa chức vụ "${posName}"?`,
+      onConfirm: () => {
+        setFormData(prev => ({ ...prev, positions: prev.positions.filter(p => p.id !== id) }));
+        setDeleteConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   const handleAddHoliday = () => {
@@ -158,7 +189,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   };
 
   const handleDeleteHoliday = (id: string) => {
-    setFormData(prev => ({ ...prev, holidays: prev.holidays.filter(h => h.id !== id) }));
+    const hol = formData.holidays.find(h => h.id === id);
+    const holName = hol ? hol.name : 'ngày nghỉ lễ này';
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Xác Nhận Xóa Ngày Nghỉ Lễ',
+      message: `Bạn có chắc chắn muốn xóa ngày nghỉ lễ "${holName}"?`,
+      onConfirm: () => {
+        setFormData(prev => ({ ...prev, holidays: prev.holidays.filter(h => h.id !== id) }));
+        setDeleteConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   // Handlers: Quản lý giai đoạn áp dụng tỷ lệ đóng BHXH theo thời gian
@@ -201,11 +242,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   };
 
   const handleDeletePeriod = (id: string) => {
-    if (!confirm('Bạn có chắc chắn muốn xóa giai đoạn áp dụng tỷ lệ đóng BHXH này?')) return;
-    setFormData(prev => ({
-      ...prev,
-      insuranceRatePeriods: (prev.insuranceRatePeriods || []).filter(p => p.id !== id)
-    }));
+    const period = (formData.insuranceRatePeriods || []).find(p => p.id === id);
+    const periodName = period ? (period.name || period.fromMonth) : 'giai đoạn này';
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: 'Xác Nhận Xóa Giai Đoạn Đóng BHXH',
+      message: `Bạn có chắc chắn muốn xóa giai đoạn áp dụng tỷ lệ đóng BHXH "${periodName}"?`,
+      onConfirm: () => {
+        setFormData(prev => ({
+          ...prev,
+          insuranceRatePeriods: (prev.insuranceRatePeriods || []).filter(p => p.id !== id)
+        }));
+        setDeleteConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   const handleSavePeriod = (e: React.FormEvent) => {
@@ -2444,6 +2494,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={deleteConfirmModal.isOpen}
+        title={deleteConfirmModal.title}
+        message={deleteConfirmModal.message}
+        onConfirm={deleteConfirmModal.onConfirm}
+        onCancel={() => setDeleteConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { AppUser, UserRole, Employee, RolePermissions } from '../types';
+import { ConfirmModal } from '../components/ConfirmModal';
 
 interface UserManagementViewProps {
   employees: Employee[];
@@ -61,6 +62,24 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
     role: 'payroll',
     employeeId: '',
     status: 'active'
+  });
+
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    user: AppUser | null;
+  }>({
+    isOpen: false,
+    user: null
+  });
+
+  const [resetPwdModal, setResetPwdModal] = useState<{
+    isOpen: boolean;
+    user: AppUser | null;
+    newPassword: string;
+  }>({
+    isOpen: false,
+    user: null,
+    newPassword: '123'
   });
 
   const showToast = (msg: string) => {
@@ -152,23 +171,40 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
 
   const handleDelete = (user: AppUser) => {
     if (user.id === currentUser?.id) {
-      alert('Không thể xóa tài khoản bạn đang đăng nhập!');
+      showToast('Không thể xóa tài khoản bạn đang đăng nhập!');
       return;
     }
-    if (confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản "${user.name}" (@${user.username})?`)) {
-      deleteUser(user.id);
-      showToast(`Đã xóa tài khoản "${user.username}" khỏi hệ thống!`);
+    setDeleteConfirmModal({
+      isOpen: true,
+      user
+    });
+  };
+
+  const handleConfirmDeleteUser = () => {
+    if (deleteConfirmModal.user) {
+      deleteUser(deleteConfirmModal.user.id);
+      showToast(`Đã xóa tài khoản "${deleteConfirmModal.user.username}" khỏi hệ thống!`);
+      setDeleteConfirmModal({ isOpen: false, user: null });
     }
   };
 
   const handleResetPassword = (user: AppUser) => {
-    const newPwd = prompt(`Đặt lại mật khẩu mới cho tài khoản @${user.username}:`, '123');
-    if (newPwd !== null && newPwd.trim() !== '') {
+    setResetPwdModal({
+      isOpen: true,
+      user,
+      newPassword: '123'
+    });
+  };
+
+  const handleConfirmResetPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (resetPwdModal.user && resetPwdModal.newPassword.trim()) {
       updateUser({
-        ...user,
-        password: newPwd.trim()
+        ...resetPwdModal.user,
+        password: resetPwdModal.newPassword.trim()
       });
-      showToast(`Đã đổi mật khẩu cho tài khoản "${user.username}" thành "${newPwd.trim()}"!`);
+      showToast(`Đã đổi mật khẩu cho tài khoản "${resetPwdModal.user.username}" thành "${resetPwdModal.newPassword.trim()}"!`);
+      setResetPwdModal({ isOpen: false, user: null, newPassword: '123' });
     }
   };
 
@@ -813,6 +849,64 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
                 >
                   <Check className="w-4 h-4" />
                   <span>{editingUser ? 'Cập Nhật Tài Khoản' : 'Lưu Tài Khoản'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal xác nhận xóa người dùng */}
+      <ConfirmModal
+        isOpen={deleteConfirmModal.isOpen}
+        title="Xác Nhận Xóa Tài Khoản"
+        message={`Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản "${deleteConfirmModal.user?.name || ''}" (@${deleteConfirmModal.user?.username || ''}) khỏi hệ thống?`}
+        onConfirm={handleConfirmDeleteUser}
+        onCancel={() => setDeleteConfirmModal({ isOpen: false, user: null })}
+      />
+
+      {/* Modal Đặt Lại Mật Khẩu (thay thế window.prompt bị chặn trên iframe) */}
+      {resetPwdModal.isOpen && resetPwdModal.user && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-amber-100 text-amber-600 rounded-xl">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm">Đặt Lại Mật Khẩu</h4>
+                <p className="text-xs text-slate-500">Tài khoản: @{resetPwdModal.user.username}</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmResetPassword}>
+              <div className="mb-4">
+                <label className="block text-xs font-bold text-slate-700 mb-1">Mật khẩu mới:</label>
+                <input
+                  type="text"
+                  value={resetPwdModal.newPassword}
+                  onChange={e => setResetPwdModal(prev => ({ ...prev, newPassword: e.target.value }))}
+                  required
+                  placeholder="Nhập mật khẩu mới..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-amber-500 outline-hidden font-mono"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetPwdModal({ isOpen: false, user: null, newPassword: '123' })}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Hủy Bỏ
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Cập Nhật Mật Khẩu</span>
                 </button>
               </div>
             </form>
