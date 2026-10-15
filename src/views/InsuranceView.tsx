@@ -29,7 +29,7 @@ import {
   CalendarRange
 } from 'lucide-react';
 import { InsuranceRecord, Employee, SystemSettings, InsuranceSalaryHistory, InsuranceRatePeriod } from '../types';
-import { formatVND, isEmployeeActiveInMonth, getInsuranceRatesForMonth, getAvailableYears } from '../utils/payrollCalculator';
+import { formatVND, isEmployeeActiveInMonth, getInsuranceRatesForMonth, getAvailableYears, getEffectiveInsuranceSalaryForMonth } from '../utils/payrollCalculator';
 import * as XLSX from 'xlsx';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintInsuranceModal } from '../components/PrintInsuranceModal';
@@ -54,6 +54,7 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
   const { canEditEmployees, canExportData, canEditSettings } = useAuthRole();
   const [activeTab, setActiveTab] = useState<'monthly' | 'annual'>('monthly');
   const [selectedYear, setSelectedYear] = useState<number>(settings.currentYear || 2026);
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => settings.currentMonth || 1);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
   const [annualViewMode, setAnnualViewMode] = useState<'12_months' | 'funds_breakdown'>('12_months');
@@ -184,30 +185,16 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
       let activeMonthsCount = 0;
 
       for (let m = 1; m <= 12; m++) {
-        const monthKey = `${selectedYear}-${String(m).padStart(2, '0')}`;
         const isActive = isEmployeeActiveInMonth(emp, m, selectedYear);
+        const { salary: mSalary, isParticipating: participatesThisMonth } = getEffectiveInsuranceSalaryForMonth(
+          ins || undefined,
+          emp,
+          m,
+          selectedYear
+        );
 
-        let participatesThisMonth = isParticipating && isActive;
-        if (participatesThisMonth && ins?.startDate) {
-          const startMonthKey = ins.startDate.slice(0, 7);
-          if (monthKey < startMonthKey) {
-            participatesThisMonth = false;
-          }
-        }
-
-        if (participatesThisMonth) {
+        if (isActive && isParticipating && participatesThisMonth && mSalary > 0) {
           activeMonthsCount++;
-          let mSalary = ins?.insuranceSalary || emp.baseSalary;
-          if (ins?.history && ins.history.length > 0) {
-            const matchedHistory = ins.history.find(h => {
-              const fromM = h.fromMonth;
-              const toM = h.toMonth;
-              return monthKey >= fromM && (!toM || monthKey <= toM);
-            });
-            if (matchedHistory) {
-              mSalary = matchedHistory.salary;
-            }
-          }
 
           // Lấy tỷ lệ trích đóng BHXH chuẩn có hiệu lực cho tháng m của năm được chọn (theo từng thời điểm)
           const monthRates = getInsuranceRatesForMonth(settings, selectedYear, m);
@@ -334,22 +321,35 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
   const erTotalRate = Number(((settings.socialInsRateEmployer || 0) + (settings.healthInsRateEmployer || 0) + (settings.unemploymentInsRateEmployer || 0) + (settings.tradeUnionRateEmployer || 0)).toFixed(2));
   const overallTotalRate = Number((empTotalRate + erTotalRate).toFixed(2));
 
-  // Tính tổng
+  // Tính tổng số liệu theo tháng & năm đang chọn
   let totalFundEmployee = 0;
   let totalFundEmployer = 0;
   let totalInsuranceSalarySum = 0;
   let participatingCount = 0;
 
-  insurances.forEach(ins => {
-    if (ins.isParticipating) {
+  const currentMonthRates = getInsuranceRatesForMonth(settings, selectedYear, selectedMonth);
+  const currentErRate = currentMonthRates.totalErRate;
+
+  employees.forEach(emp => {
+    const ins = insurances.find(i => i.employeeId === emp.id);
+    if (!ins || !ins.isParticipating) return;
+
+    const { salary: effSalary, isParticipating: participatesThisMonth } = getEffectiveInsuranceSalaryForMonth(
+      ins,
+      emp,
+      selectedMonth,
+      selectedYear
+    );
+
+    if (participatesThisMonth && effSalary > 0) {
       participatingCount++;
-      totalInsuranceSalarySum += ins.insuranceSalary;
-      const thisEmpRate = ((ins.customSocialRate ?? settings.socialInsRateEmployee) + 
-                           (ins.customHealthRate ?? settings.healthInsRateEmployee) + 
-                           (ins.customUnempRate ?? settings.unemploymentInsRateEmployee)) / 100;
-      const thisErRate = erTotalRate / 100;
-      totalFundEmployee += Math.round(ins.insuranceSalary * thisEmpRate);
-      totalFundEmployer += Math.round(ins.insuranceSalary * thisErRate);
+      totalInsuranceSalarySum += effSalary;
+      const thisEmpRate = ((ins.customSocialRate !== undefined ? ins.customSocialRate : currentMonthRates.socialInsRateEmployee) + 
+                           (ins.customHealthRate !== undefined ? ins.customHealthRate : currentMonthRates.healthInsRateEmployee) + 
+                           (ins.customUnempRate !== undefined ? ins.customUnempRate : currentMonthRates.unemploymentInsRateEmployee)) / 100;
+      const thisErRate = currentErRate / 100;
+      totalFundEmployee += Math.round(effSalary * thisEmpRate);
+      totalFundEmployer += Math.round(effSalary * thisErRate);
     }
   });
 
@@ -456,9 +456,11 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
     const isLatest = historyForm.isOngoing || !toMonthVal;
     const newSalary = isLatest ? Number(historyForm.salary) : historyTarget.insurance.insuranceSalary;
 
-    // Tự động thiết lập startDate từ kỳ sớm nhất nếu chưa có
+    // Tự động thiết lập startDate từ kỳ sớm nhất nếu chưa có hoặc nếu kỳ mới sớm hơn
     const earliestMonth = updatedHistory[0]?.fromMonth;
-    const resolvedStartDate = historyTarget.insurance.startDate || earliestMonth;
+    const resolvedStartDate = (!historyTarget.insurance.startDate || (earliestMonth && earliestMonth < historyTarget.insurance.startDate))
+      ? earliestMonth
+      : historyTarget.insurance.startDate;
 
     const updatedIns: InsuranceRecord = {
       ...historyTarget.insurance,
@@ -504,8 +506,8 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
 
     const currentHistory = historyTarget.insurance.history ? [...historyTarget.insurance.history] : [];
     const updatedHistory = currentHistory.filter((h, idx) => {
-      if (itemId && h.id) return h.id !== itemId;
-      if (itemIndex !== null) return idx !== itemIndex;
+      if (itemIndex !== null && idx === itemIndex) return false;
+      if (itemId && h.id && h.id === itemId) return false;
       return true;
     });
 
@@ -551,8 +553,13 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
   const handleExportExcel = () => {
     const rows = employees.map((emp, idx) => {
       const ins = insurances.find(i => i.employeeId === emp.id);
-      const isPart = ins?.isParticipating ?? true;
-      const salary = isPart ? (ins?.insuranceSalary || emp.baseSalary) : 0;
+      const { salary: effectiveSalary, isParticipating } = getEffectiveInsuranceSalaryForMonth(
+        ins,
+        emp,
+        selectedMonth,
+        selectedYear
+      );
+      const salary = isParticipating ? effectiveSalary : 0;
 
       const socEmpRate = ins?.customSocialRate ?? settings.socialInsRateEmployee;
       const heaEmpRate = ins?.customHealthRate ?? settings.healthInsRateEmployee;
@@ -578,7 +585,7 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
         'Chức Vụ': posMap.get(emp.positionId) || '',
         'Thời Gian Bắt Đầu Đóng': ins?.startDate || '',
         'Số Giai Đoạn Đóng': ins?.history?.length || 0,
-        'Tham Gia BHXH': isPart ? 'Có' : 'Không',
+        'Tham Gia BHXH': isParticipating ? 'Có' : 'Không',
         'Mức Lương Đóng BHXH': salary,
         [`BHXH NLĐ (${socEmpRate}%)`]: socEmp,
         [`BHYT NLĐ (${heaEmpRate}%)`]: heaEmp,
@@ -597,7 +604,7 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Trich_Nop_BHXH');
-    XLSX.writeFile(wb, `Danh_Sach_Dong_BHXH_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `Danh_Sach_Dong_BHXH_T${selectedMonth}_${selectedYear}.xlsx`);
   };
 
   const handleExportAnnualExcel = () => {
@@ -771,19 +778,45 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
           </div>
 
           {/* Search & Filter Bar */}
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="relative w-full sm:w-80">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Tìm theo họ tên, mã NV, số CCCD..."
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
-              />
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 flex flex-col lg:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-3 w-full lg:w-auto flex-wrap">
+              {/* Chọn Tháng & Năm */}
+              <div className="flex items-center gap-2 bg-purple-50 px-3 py-1.5 rounded-xl border border-purple-200">
+                <Calendar className="w-4 h-4 text-purple-700 shrink-0" />
+                <span className="text-xs font-bold text-purple-900 whitespace-nowrap">Kỳ Tháng:</span>
+                <select
+                  value={selectedMonth}
+                  onChange={e => setSelectedMonth(Number(e.target.value))}
+                  className="bg-white text-purple-950 font-bold text-xs px-2.5 py-1 rounded-lg border border-purple-300 cursor-pointer focus:ring-2 focus:ring-purple-500"
+                >
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                    <option key={m} value={m}>Tháng {m}</option>
+                  ))}
+                </select>
+                <select
+                  value={selectedYear}
+                  onChange={e => setSelectedYear(Number(e.target.value))}
+                  className="bg-white text-purple-950 font-bold text-xs px-2.5 py-1 rounded-lg border border-purple-300 cursor-pointer focus:ring-2 focus:ring-purple-500"
+                >
+                  {getAvailableYears(selectedYear).map(y => (
+                    <option key={y} value={y}>Năm {y}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Tìm theo họ tên, mã NV, số CCCD..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                />
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2 w-full lg:w-auto">
               <Filter className="w-4 h-4 text-slate-400 shrink-0" />
               <select
                 value={filterDepartment}
@@ -840,7 +873,17 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
 
                       const isDuplicateCccd = emp.idCardNumber ? duplicateIdCards.has(emp.idCardNumber.trim()) : false;
                       const isEditing = editingId === ins.id;
-                      const salary = ins.isParticipating ? (isEditing ? Number(editValues.insuranceSalary) || 0 : ins.insuranceSalary) : 0;
+                      
+                      const { salary: effectiveSalary, isParticipating: participatesThisMonth, note: historyNote } = getEffectiveInsuranceSalaryForMonth(
+                        ins,
+                        emp,
+                        selectedMonth,
+                        selectedYear
+                      );
+
+                      const salary = (ins.isParticipating && participatesThisMonth)
+                        ? (isEditing ? Number(editValues.insuranceSalary) || 0 : effectiveSalary)
+                        : 0;
                       
                       const currentEmpRate = isEditing 
                         ? (editValues.useCustomRates 
@@ -927,7 +970,17 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                                 className="w-28 px-2 py-1 border border-slate-300 rounded font-mono text-right text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                               />
                             ) : (
-                              formatVND(salary)
+                              <div>
+                                <div>{formatVND(salary)}</div>
+                                {ins.history && ins.history.length > 0 && (
+                                  <span 
+                                    className="inline-block text-[9px] font-sans font-bold text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded mt-0.5 border border-purple-200"
+                                    title={historyNote || `Lương đóng áp dụng cho kỳ Tháng ${selectedMonth}/${selectedYear} theo Quá trình đóng BHXH`}
+                                  >
+                                    Theo quá trình
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </td>
                           <td className="px-4 py-3 text-center">
@@ -2108,6 +2161,8 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
         insurances={insurances}
         employees={employees}
         settings={settings}
+        customMonth={selectedMonth}
+        customYear={selectedYear}
       />
 
       {/* Modal In Báo Cáo BHXH Cả Năm */}

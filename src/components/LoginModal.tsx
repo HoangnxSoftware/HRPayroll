@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { SystemSettings, GoogleSyncState } from '../types';
-import { googleSignIn, logout, getCurrentUser } from '../services/authService';
+import { googleSignIn, logout, getCurrentUser, hasValidGoogleToken } from '../services/authService';
 import { 
   listDriveSpreadsheets, 
   DriveSpreadsheetItem,
@@ -400,7 +400,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }));
 
       // If a Google sheet is selected and user is connected, load latest data and system settings upon login
-      if (syncState.isConnected && selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet) {
+      if (syncState.isConnected && selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet && hasValidGoogleToken()) {
         try {
           await onLoadDataFromSpreadsheet(selectedFileId, selectedFileName || undefined);
         } catch (err) {

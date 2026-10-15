@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   Building, 
   UserCheck, 
@@ -20,8 +20,15 @@ import {
   X,
   CalendarRange,
   History,
-  Info
+  Info,
+  Download,
+  Upload,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  FileSpreadsheet
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { SystemSettings, Department, Position, Holiday, SalaryCalculationBasis, FixedDaysOffPolicy, TaxBracket, TaxExemptionRules, InsuranceRatePeriod } from '../types';
 import { formatVND, calculateStandardDaysFromPolicy, DEFAULT_TAX_BRACKETS, DEFAULT_TAX_EXEMPTION_RULES, getAvailableYears } from '../utils/payrollCalculator';
 import { useAuthRole } from '../context/AuthRoleContext';
@@ -114,7 +121,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       managerName: newDep.managerName.trim(),
       description: newDep.description.trim()
     };
-    setFormData(prev => ({ ...prev, departments: [...prev.departments, item] }));
+    const updated = { ...formData, departments: [...formData.departments, item] };
+    setFormData(updated);
+    onUpdateSettings(updated);
     setNewDep({ code: '', name: '', managerName: '', description: '' });
   };
 
@@ -138,7 +147,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       title: 'Xác Nhận Xóa Phòng Ban',
       message: `Bạn có chắc chắn muốn xóa phòng ban "${depName}"?`,
       onConfirm: () => {
-        setFormData(prev => ({ ...prev, departments: prev.departments.filter(d => d.id !== id) }));
+        const updated = { ...formData, departments: formData.departments.filter(d => d.id !== id) };
+        setFormData(updated);
+        onUpdateSettings(updated);
         setDeleteConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
     });
@@ -155,7 +166,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       name: newPos.name.trim(),
       responsibilityAllowance: Number(newPos.responsibilityAllowance) || 0
     };
-    setFormData(prev => ({ ...prev, positions: [...prev.positions, item] }));
+    const updated = { ...formData, positions: [...formData.positions, item] };
+    setFormData(updated);
+    onUpdateSettings(updated);
     setNewPos({ code: '', name: '', responsibilityAllowance: 0 });
   };
 
@@ -167,15 +180,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       title: 'Xác Nhận Xóa Chức Vụ',
       message: `Bạn có chắc chắn muốn xóa chức vụ "${posName}"?`,
       onConfirm: () => {
-        setFormData(prev => ({ ...prev, positions: prev.positions.filter(p => p.id !== id) }));
+        const updated = { ...formData, positions: formData.positions.filter(p => p.id !== id) };
+        setFormData(updated);
+        onUpdateSettings(updated);
         setDeleteConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
     });
   };
 
+  // Holidays state: Sắp xếp theo ngày nghỉ (asc: tăng dần, desc: giảm dần)
+  const [holidaySortOrder, setHolidaySortOrder] = useState<'asc' | 'desc'>('asc');
+  const [holidayNotice, setHolidayNotice] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
+  const holidayFileInputRef = useRef<HTMLInputElement>(null);
+
+  const sortedHolidays = useMemo(() => {
+    return [...formData.holidays].sort((a, b) => {
+      const cmp = (a.date || '').localeCompare(b.date || '');
+      return holidaySortOrder === 'asc' ? cmp : -cmp;
+    });
+  }, [formData.holidays, holidaySortOrder]);
+
   const handleAddHoliday = () => {
     if (!newHol.name || !newHol.date) {
       alert('Vui lòng nhập Ngày và Tên ngày nghỉ lễ');
+      return;
+    }
+    if (formData.holidays.some(h => (h.date || '').trim() === newHol.date.trim())) {
+      alert(`Ngày nghỉ lễ ${newHol.date} đã tồn tại trong danh sách!`);
       return;
     }
     const item: Holiday = {
@@ -184,22 +215,234 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       name: newHol.name.trim(),
       isPaid: newHol.isPaid
     };
-    setFormData(prev => ({ ...prev, holidays: [...prev.holidays, item] }));
-    setNewHol({ date: '2026-09-02', name: '', isPaid: true });
+    const updated = { ...formData, holidays: [...formData.holidays, item] };
+    setFormData(updated);
+    onUpdateSettings(updated);
+    setNewHol({ date: `${formData.currentYear || 2026}-09-02`, name: '', isPaid: true });
+    setHolidayNotice({ type: 'success', message: `Đã thêm mới ngày lễ "${item.name}" (${item.date})!` });
+    setTimeout(() => setHolidayNotice(null), 3000);
   };
 
   const handleDeleteHoliday = (id: string) => {
     const hol = formData.holidays.find(h => h.id === id);
-    const holName = hol ? hol.name : 'ngày nghỉ lễ này';
+    const holName = hol ? `${hol.name} (${hol.date})` : 'ngày nghỉ lễ này';
     setDeleteConfirmModal({
       isOpen: true,
       title: 'Xác Nhận Xóa Ngày Nghỉ Lễ',
-      message: `Bạn có chắc chắn muốn xóa ngày nghỉ lễ "${holName}"?`,
+      message: `Bạn có chắc chắn muốn xóa ngày nghỉ lễ "${holName}" khỏi hệ thống?`,
       onConfirm: () => {
-        setFormData(prev => ({ ...prev, holidays: prev.holidays.filter(h => h.id !== id) }));
+        const updated = { ...formData, holidays: formData.holidays.filter(h => h.id !== id) };
+        setFormData(updated);
+        onUpdateSettings(updated);
         setDeleteConfirmModal(prev => ({ ...prev, isOpen: false }));
+        setHolidayNotice({ type: 'info', message: `Đã xóa ngày nghỉ lễ "${holName}".` });
+        setTimeout(() => setHolidayNotice(null), 3000);
       }
     });
+  };
+
+  // Xuất danh sách Ngày nghỉ lễ ra file Excel
+  const handleExportHolidaysExcel = () => {
+    const list = [...formData.holidays].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const rows = [
+      [`DANH SÁCH NGÀY NGHỈ LỄ TẾT TRONG NĂM`],
+      [`Đơn vị: ${formData.companyName}`],
+      [`Năm áp dụng: ${formData.currentYear || 2026}`],
+      [],
+      ['STT', 'Ngày Nghỉ (YYYY-MM-DD)', 'Tên Ngày Nghỉ Lễ / Tết', 'Hưởng Nguyên Lương', 'Ghi Chú'],
+      ...list.map((h, idx) => [
+        idx + 1,
+        h.date,
+        h.name,
+        h.isPaid ? 'Hưởng 100% Lương' : 'Không hưởng lương',
+        h.isPaid ? 'Được tính nguyên lương theo Bộ luật Lao động' : ''
+      ])
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'NgayNghiLeTet');
+    XLSX.writeFile(wb, `Danh_Sach_Ngay_Nghi_Le_Tet_${formData.currentYear || 2026}.xlsx`);
+  };
+
+  // Nhập danh sách Ngày nghỉ lễ từ file Excel & tự động bỏ ngày trùng đã có
+  const handleImportHolidaysExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const rawData = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 });
+
+        if (!rawData || rawData.length === 0) {
+          setHolidayNotice({ type: 'error', message: 'File Excel không có dữ liệu hoặc không đọc được!' });
+          return;
+        }
+
+        // Tìm dòng tiêu đề chứa "Ngày" hoặc "Ngày Nghỉ" hoặc "Tên"
+        let headerRowIndex = 0;
+        let dateColIndex = -1;
+        let nameColIndex = -1;
+        let paidColIndex = -1;
+
+        for (let r = 0; r < Math.min(10, rawData.length); r++) {
+          const row = rawData[r] || [];
+          for (let c = 0; c < row.length; c++) {
+            const cell = String(row[c] || '').toLowerCase().trim();
+            if (cell.includes('ngày') && (cell.includes('nghỉ') || cell.includes('lễ') || cell.includes('yyyy') || cell.includes('date'))) {
+              dateColIndex = c;
+              headerRowIndex = r;
+            } else if (cell.includes('tên') && (cell.includes('lễ') || cell.includes('nghỉ') || cell.includes('name'))) {
+              nameColIndex = c;
+            } else if (cell.includes('hưởng') || cell.includes('lương') || cell.includes('paid')) {
+              paidColIndex = c;
+            }
+          }
+          if (dateColIndex !== -1 && nameColIndex !== -1) {
+            break;
+          }
+        }
+
+        // Nếu không tự nhận diện được tiêu đề, dùng mặc định
+        if (dateColIndex === -1 || nameColIndex === -1) {
+          headerRowIndex = 0;
+          for (let r = 0; r < Math.min(10, rawData.length); r++) {
+            const row = rawData[r] || [];
+            if (row.length >= 2) {
+              const str0 = String(row[0] || '').trim();
+              const str1 = String(row[1] || '').trim();
+              if (/\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4}/.test(str0)) {
+                dateColIndex = 0;
+                nameColIndex = 1;
+                paidColIndex = 2;
+                headerRowIndex = r - 1;
+                break;
+              } else if (/\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4}/.test(str1)) {
+                dateColIndex = 1;
+                nameColIndex = 2;
+                paidColIndex = 3;
+                headerRowIndex = r - 1;
+                break;
+              }
+            }
+          }
+          if (dateColIndex === -1) dateColIndex = 1;
+          if (nameColIndex === -1) nameColIndex = 2;
+          if (paidColIndex === -1) paidColIndex = 3;
+        }
+
+        // Tập hợp các ngày đã có trong hệ thống để tự động bỏ trùng
+        const existingDateSet = new Set(formData.holidays.map(h => (h.date || '').trim()));
+        const seenInFile = new Set<string>();
+        let skippedDuplicateCount = 0;
+        let invalidDateCount = 0;
+        const newHolidays: Holiday[] = [];
+
+        for (let r = headerRowIndex + 1; r < rawData.length; r++) {
+          const row = rawData[r];
+          if (!row || row.length === 0) continue;
+
+          let rawDate = row[dateColIndex];
+          let rawName = row[nameColIndex];
+          let rawPaid = row[paidColIndex];
+
+          if (rawDate === undefined || rawDate === null || String(rawDate).trim() === '') continue;
+
+          // Xử lý chuẩn hóa ngày về YYYY-MM-DD
+          let parsedDate = '';
+          if (rawDate instanceof Date) {
+            const y = rawDate.getFullYear();
+            const m = String(rawDate.getMonth() + 1).padStart(2, '0');
+            const d = String(rawDate.getDate()).padStart(2, '0');
+            parsedDate = `${y}-${m}-${d}`;
+          } else {
+            const dStr = String(rawDate).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) {
+              parsedDate = dStr;
+            } else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dStr)) {
+              const parts = dStr.split('/');
+              parsedDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            } else if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(dStr)) {
+              const parts = dStr.split('-');
+              parsedDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            } else if (typeof rawDate === 'number') {
+              // Excel serial date number
+              const parsedEpoch = new Date((rawDate - (25567 + 2)) * 86400 * 1000);
+              const y = parsedEpoch.getFullYear();
+              const m = String(parsedEpoch.getMonth() + 1).padStart(2, '0');
+              const d = String(parsedEpoch.getDate()).padStart(2, '0');
+              parsedDate = `${y}-${m}-${d}`;
+            }
+          }
+
+          if (!parsedDate || !/^\d{4}-\d{2}-\d{2}$/.test(parsedDate)) {
+            invalidDateCount++;
+            continue;
+          }
+
+          // Tự động bỏ ngày trùng đã có trong danh sách hiện tại hoặc lặp trong file
+          if (existingDateSet.has(parsedDate) || seenInFile.has(parsedDate)) {
+            skippedDuplicateCount++;
+            continue;
+          }
+
+          seenInFile.add(parsedDate);
+
+          const holidayName = String(rawName || '').trim() || `Nghỉ lễ ${parsedDate}`;
+          const isPaidStr = String(rawPaid || '').toLowerCase().trim();
+          const isPaid = isPaidStr.includes('không') || isPaidStr === 'false' || isPaidStr === '0' ? false : true;
+
+          newHolidays.push({
+            id: `hol-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            date: parsedDate,
+            name: holidayName,
+            isPaid
+          });
+        }
+
+        if (newHolidays.length === 0) {
+          if (skippedDuplicateCount > 0) {
+            setHolidayNotice({
+              type: 'info',
+              message: `Toàn bộ ${skippedDuplicateCount} ngày lễ trong file đều đã tồn tại trong hệ thống (đã tự động bỏ qua toàn bộ ngày trùng lặp).`
+            });
+          } else {
+            setHolidayNotice({
+              type: 'error',
+              message: 'Không tìm thấy dòng ngày nghỉ hợp lệ trong file Excel tải lên.'
+            });
+          }
+          return;
+        }
+
+        const updatedHolidays = [...formData.holidays, ...newHolidays];
+        const updated = {
+          ...formData,
+          holidays: updatedHolidays
+        };
+        setFormData(updated);
+        onUpdateSettings(updated);
+
+        setHolidayNotice({
+          type: 'success',
+          message: `Đã nhập thành công ${newHolidays.length} ngày nghỉ lễ mới (đã tự động bỏ qua ${skippedDuplicateCount} ngày bị trùng lặp)!`
+        });
+        setTimeout(() => setHolidayNotice(null), 5000);
+      } catch (err: any) {
+        console.error('Lỗi nhập Excel ngày lễ:', err);
+        setHolidayNotice({ type: 'error', message: `Lỗi khi đọc file Excel: ${err.message}` });
+      } finally {
+        if (holidayFileInputRef.current) {
+          holidayFileInputRef.current.value = '';
+        }
+      }
+    };
+    reader.readAsBinaryString(file);
   };
 
   // Handlers: Quản lý giai đoạn áp dụng tỷ lệ đóng BHXH theo thời gian
@@ -249,10 +492,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       title: 'Xác Nhận Xóa Giai Đoạn Đóng BHXH',
       message: `Bạn có chắc chắn muốn xóa giai đoạn áp dụng tỷ lệ đóng BHXH "${periodName}"?`,
       onConfirm: () => {
-        setFormData(prev => ({
-          ...prev,
-          insuranceRatePeriods: (prev.insuranceRatePeriods || []).filter(p => p.id !== id)
-        }));
+        const updated = {
+          ...formData,
+          insuranceRatePeriods: (formData.insuranceRatePeriods || []).filter(p => p.id !== id)
+        };
+        setFormData(updated);
+        onUpdateSettings(updated);
         setDeleteConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
     });
@@ -2006,6 +2251,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* Tab 5: Holidays */}
       {activeTab === 'holidays' && (
         <div className="bg-white p-6 rounded-b-2xl border border-t-0 border-slate-200 shadow-xs space-y-6">
+          {/* Notification Alert Banner */}
+          {holidayNotice && (
+            <div className={`p-4 rounded-xl border flex items-center justify-between gap-3 text-xs animate-in fade-in duration-200 ${
+              holidayNotice.type === 'success'
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                : holidayNotice.type === 'error'
+                  ? 'bg-rose-50 border-rose-300 text-rose-900'
+                  : 'bg-blue-50 border-blue-300 text-blue-900'
+            }`}>
+              <div className="flex items-center gap-2">
+                {holidayNotice.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : holidayNotice.type === 'error' ? (
+                  <X className="w-4 h-4 text-rose-600 shrink-0" />
+                ) : (
+                  <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                )}
+                <span className="font-medium">{holidayNotice.message}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHolidayNotice(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Add Holiday Form */}
           {canEditSettings && (
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-3">
               <span className="font-bold text-slate-900 block">Thêm Ngày Nghỉ Lễ Trong Năm</span>
@@ -2014,14 +2289,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                   type="date"
                   value={newHol.date}
                   onChange={e => setNewHol({ ...newHol, date: e.target.value })}
-                  className="px-3 py-2 border border-slate-300 rounded-lg"
+                  className="px-3 py-2 border border-slate-300 rounded-lg bg-white"
                 />
                 <input
                   type="text"
                   placeholder="Tên ngày nghỉ (vd: Tết Dương Lịch)"
                   value={newHol.name}
                   onChange={e => setNewHol({ ...newHol, name: e.target.value })}
-                  className="px-3 py-2 border border-slate-300 rounded-lg md:col-span-2"
+                  className="px-3 py-2 border border-slate-300 rounded-lg md:col-span-2 bg-white"
                 />
                 <button
                   type="button"
@@ -2035,113 +2310,194 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
             </div>
           )}
 
+          {/* Action Toolbar: Sắp xếp theo ngày nghỉ, Kết xuất Excel, Nhập từ Excel */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50/80 border border-slate-200 rounded-xl text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-emerald-600" />
+                <span>Danh Sách Ngày Nghỉ Lễ Tết ({formData.holidays.length} ngày):</span>
+              </span>
+
+              {/* Sắp xếp theo ngày nghỉ */}
+              <button
+                type="button"
+                onClick={() => setHolidaySortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg font-semibold shadow-2xs transition-colors cursor-pointer"
+                title="Thay đổi thứ tự sắp xếp theo ngày nghỉ"
+              >
+                <ArrowUpDown className="w-3.5 h-3.5 text-blue-600" />
+                <span>Sắp xếp ngày: <strong className="text-blue-700">{holidaySortOrder === 'asc' ? 'Tăng dần (từ đầu năm)' : 'Giảm dần (từ cuối năm)'}</strong></span>
+                {holidaySortOrder === 'asc' ? (
+                  <ArrowUp className="w-3 h-3 text-emerald-600" />
+                ) : (
+                  <ArrowDown className="w-3 h-3 text-emerald-600" />
+                )}
+              </button>
+            </div>
+
+            {/* Excel Actions: Kết xuất & Nhập từ Excel */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Hidden file input for Excel import */}
+              <input
+                type="file"
+                ref={holidayFileInputRef}
+                onChange={handleImportHolidaysExcel}
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+              />
+
+              <button
+                type="button"
+                onClick={handleExportHolidaysExcel}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg font-semibold shadow-2xs transition-colors cursor-pointer"
+                title="Kết xuất danh sách ngày nghỉ lễ ra file Excel chuẩn"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Kết Xuất Excel</span>
+              </button>
+
+              {canEditSettings && (
+                <button
+                  type="button"
+                  onClick={() => holidayFileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-xs transition-colors cursor-pointer"
+                  title="Nhập danh sách ngày nghỉ lễ từ file Excel (tự động bỏ ngày trùng đã có)"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Nhập Từ Excel</span>
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead className="bg-slate-50 text-slate-600 font-semibold uppercase border-b border-slate-200">
                 <tr>
-                  <th className="px-4 py-3">Ngày Nghỉ (YYYY-MM-DD)</th>
+                  <th 
+                    className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+                    onClick={() => setHolidaySortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                    title="Bấm để đảo chiều sắp xếp theo ngày nghỉ"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Ngày Nghỉ (YYYY-MM-DD)</span>
+                      {holidaySortOrder === 'asc' ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-blue-600 font-bold" />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-blue-600 font-bold" />
+                      )}
+                    </div>
+                  </th>
                   <th className="px-4 py-3">Tên Ngày Nghỉ Lễ / Tết</th>
                   <th className="px-4 py-3 text-center">Hưởng Nguyên Lương</th>
                   <th className="px-4 py-3 text-right">Thao Tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {formData.holidays.map(h => {
-                  const isEditing = editingHolId === h.id && editHolData;
-                  return (
-                    <tr key={h.id} className={isEditing ? "bg-amber-50/60" : "hover:bg-slate-50 transition-colors"}>
-                      <td className="px-4 py-3">
-                        {isEditing ? (
-                          <input
-                            type="date"
-                            value={editHolData.date}
-                            onChange={e => setEditHolData({ ...editHolData, date: e.target.value })}
-                            className="px-2.5 py-1.5 border border-amber-300 rounded font-mono font-bold text-slate-900 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                          />
-                        ) : (
-                          <span className="font-mono font-bold text-slate-900">{h.date}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editHolData.name}
-                            onChange={e => setEditHolData({ ...editHolData, name: e.target.value })}
-                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                          />
-                        ) : (
-                          <span className="font-semibold text-slate-800">{h.name}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {isEditing ? (
-                          <select
-                            value={editHolData.isPaid ? 'true' : 'false'}
-                            onChange={e => setEditHolData({ ...editHolData, isPaid: e.target.value === 'true' })}
-                            className="px-2 py-1.5 border border-amber-300 rounded text-xs font-semibold bg-white"
-                          >
-                            <option value="true">Hưởng 100% Lương</option>
-                            <option value="false">Không hưởng lương</option>
-                          </select>
-                        ) : (
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded text-[11px]">
-                            {h.isPaid ? 'Hưởng 100% Lương' : 'Không hưởng lương'}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {canEditSettings && (
-                          <div className="flex items-center justify-end gap-1">
-                            {isEditing ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={handleSaveEditHoliday}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-semibold text-[11px] shadow-xs cursor-pointer transition-colors"
-                                  title="Lưu thay đổi"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                  <span>Lưu</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={handleCancelEditHoliday}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded font-semibold text-[11px] cursor-pointer transition-colors"
-                                  title="Hủy chỉnh sửa"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                  <span>Hủy</span>
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleStartEditHoliday(h)}
-                                  className="flex items-center gap-1 px-2 py-1 text-blue-600 hover:bg-blue-50 rounded font-semibold text-[11px] transition-colors cursor-pointer"
-                                  title="Chỉnh sửa ngày lễ"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                  <span>Sửa</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteHoliday(h.id)}
-                                  className="flex items-center gap-1 px-2 py-1 text-red-500 hover:bg-red-50 rounded font-semibold text-[11px] transition-colors cursor-pointer"
-                                  title="Xóa ngày lễ"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  <span>Xóa</span>
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {sortedHolidays.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
+                      Chưa có ngày nghỉ lễ nào trong danh sách. Bạn có thể thêm mới hoặc nhập từ file Excel.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedHolidays.map(h => {
+                    const isEditing = editingHolId === h.id && editHolData;
+                    return (
+                      <tr key={h.id} className={isEditing ? "bg-amber-50/60" : "hover:bg-slate-50 transition-colors"}>
+                        <td className="px-4 py-3">
+                          {isEditing ? (
+                            <input
+                              type="date"
+                              value={editHolData.date}
+                              onChange={e => setEditHolData({ ...editHolData, date: e.target.value })}
+                              className="px-2.5 py-1.5 border border-amber-300 rounded font-mono font-bold text-slate-900 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                            />
+                          ) : (
+                            <span className="font-mono font-bold text-slate-900">{h.date}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editHolData.name}
+                              onChange={e => setEditHolData({ ...editHolData, name: e.target.value })}
+                              className="w-full px-2.5 py-1.5 border border-amber-300 rounded font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800">{h.name}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {isEditing ? (
+                            <select
+                              value={editHolData.isPaid ? 'true' : 'false'}
+                              onChange={e => setEditHolData({ ...editHolData, isPaid: e.target.value === 'true' })}
+                              className="px-2 py-1.5 border border-amber-300 rounded text-xs font-semibold bg-white"
+                            >
+                              <option value="true">Hưởng 100% Lương</option>
+                              <option value="false">Không hưởng lương</option>
+                            </select>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded text-[11px]">
+                              {h.isPaid ? 'Hưởng 100% Lương' : 'Không hưởng lương'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {canEditSettings && (
+                            <div className="flex items-center justify-end gap-1">
+                              {isEditing ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={handleSaveEditHoliday}
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-semibold text-[11px] shadow-xs cursor-pointer transition-colors"
+                                    title="Lưu thay đổi"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>Lưu</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelEditHoliday}
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded font-semibold text-[11px] cursor-pointer transition-colors"
+                                    title="Hủy chỉnh sửa"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    <span>Hủy</span>
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditHoliday(h)}
+                                    className="flex items-center gap-1 px-2 py-1 text-blue-600 hover:bg-blue-50 rounded font-semibold text-[11px] transition-colors cursor-pointer"
+                                    title="Chỉnh sửa ngày lễ"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                    <span>Sửa</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteHoliday(h.id)}
+                                    className="flex items-center gap-1 px-2 py-1 text-red-500 hover:bg-red-50 rounded font-semibold text-[11px] transition-colors cursor-pointer"
+                                    title="Xóa ngày lễ"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Xóa</span>
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   FileText, 
@@ -33,6 +33,7 @@ import {
   resetCommitmentTemplate,
   numberToWordsVietnamese
 } from '../utils/documentTemplates';
+import { getEffectiveInsuranceSalaryForPeriod } from '../utils/payrollCalculator';
 import { ConfirmModal } from './ConfirmModal';
 
 export type DocumentType = 'contract' | 'commitment' | 'both';
@@ -89,6 +90,24 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
     return new Set(employees.map(e => e.id));
   });
 
+  // Đồng bộ khi mở modal hoặc khi props thay đổi
+  useEffect(() => {
+    if (isOpen) {
+      if (periodOverride?.item) {
+        setSelectedPeriodId(periodOverride.item.id || null);
+      } else {
+        setSelectedPeriodId(null);
+      }
+
+      if (initialSelectedEmployeeIds && initialSelectedEmployeeIds.length > 0) {
+        setSelectedIds(new Set(initialSelectedEmployeeIds));
+      }
+      if (initialDocType) {
+        setDocType(initialDocType);
+      }
+    }
+  }, [isOpen, periodOverride, initialSelectedEmployeeIds, initialDocType]);
+
   // Search in selection list
   const [searchFilter, setSearchFilter] = useState('');
 
@@ -144,7 +163,7 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
     return employees.filter(e => selectedIds.has(e.id));
   }, [employees, selectedIds]);
 
-  // Đối chiếu giai đoạn làm việc & mức đóng BHXH
+  // Đối chiếu giai đoạn làm việc & mức đóng BHXH chính xác theo thời điểm bắt đầu của giai đoạn
   const effectivePeriodOverride = useMemo<PeriodContractOverride | null>(() => {
     if (selectedEmployees.length !== 1) return null;
     const targetEmp = selectedEmployees[0];
@@ -152,26 +171,19 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
       return periodOverride || null;
     }
 
-    if (selectedPeriodId) {
+    if (selectedPeriodId && selectedPeriodId !== 'current') {
       const foundItem = targetEmp.workHistory.find(
         (wh, idx) => (wh.id || `wh-${idx}`) === selectedPeriodId
       );
       if (foundItem) {
-        // Đối chiếu mức đóng BHXH từ Quá trình & Mức đóng BHXH
+        // Đối chiếu mức đóng BHXH từ Quá trình & Mức đóng BHXH bằng chuẩn hóa thời gian chuẩn xác
         const matchingIns = insurances?.find(i => i.employeeId === targetEmp.id);
-        let matchedIns = matchingIns?.insuranceSalary || foundItem.baseSalary;
-        if (matchingIns?.history && matchingIns.history.length > 0) {
-          const periodMonth = foundItem.fromMonth.slice(0, 7);
-          const foundHist = matchingIns.history.find(h => {
-            if (h.fromMonth <= periodMonth) {
-              if (!h.toMonth || h.toMonth >= periodMonth) return true;
-            }
-            return false;
-          }) || matchingIns.history[matchingIns.history.length - 1];
-          if (foundHist) {
-            matchedIns = foundHist.salary;
-          }
-        }
+        const matchedIns = getEffectiveInsuranceSalaryForPeriod(
+          matchingIns,
+          targetEmp,
+          foundItem.fromMonth,
+          foundItem.baseSalary
+        );
         return {
           item: foundItem,
           matchedInsSalary: matchedIns
@@ -179,7 +191,12 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
       }
     }
 
-    return periodOverride || null;
+    // Nếu chưa chọn dropdown nhưng có periodOverride truyền vào khớp nhân viên này
+    if (selectedPeriodId === null && periodOverride && periodOverride.item) {
+      return periodOverride;
+    }
+
+    return null;
   }, [selectedEmployees, selectedPeriodId, periodOverride, insurances]);
 
   // Danh sách các trang văn bản chuẩn bị cho cả Preview trên màn hình và Dedicated Print Portal
@@ -210,6 +227,11 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
             : 'Hợp đồng lao động xác định thời hạn')
         : contractType;
 
+      const matchingIns = insurances?.find(i => i.employeeId === emp.id);
+      const effectiveInsSalary = isPeriod 
+        ? activeOverride!.matchedInsSalary 
+        : getEffectiveInsuranceSalaryForPeriod(matchingIns, emp, signDate, emp.baseSalary);
+
       const fillOptions = {
         contractType: resolvedContractType,
         signDate: isPeriod 
@@ -219,7 +241,7 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
         positionName: posName,
         representativeName,
         customBaseSalary: isPeriod ? activeOverride!.item.baseSalary : undefined,
-        insuranceSalary: isPeriod ? activeOverride!.matchedInsSalary : undefined,
+        insuranceSalary: effectiveInsSalary,
         customStartDate: isPeriod ? activeOverride!.item.fromMonth : undefined,
       };
 
@@ -400,7 +422,10 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
         const depName = depMap.get(targetDepId) || 'Bộ phận chuyên môn';
         const posName = posMap.get(targetPosId) || 'Nhân viên';
         const baseSal = isPeriod ? effectivePeriodOverride!.item.baseSalary : emp.baseSalary;
-        const insSal = isPeriod ? effectivePeriodOverride!.matchedInsSalary : (emp.baseSalary || 0);
+        const matchingIns = insurances?.find(i => i.employeeId === emp.id);
+        const insSal = isPeriod 
+          ? effectivePeriodOverride!.matchedInsSalary 
+          : getEffectiveInsuranceSalaryForPeriod(matchingIns, emp, signDate, baseSal);
         const resolvedContractType = isPeriod 
           ? (effectivePeriodOverride!.item.workStatus === 'probation' 
               ? 'Hợp đồng lao động thử việc (02 tháng)' 
@@ -704,9 +729,22 @@ export const PrintBatchContractsModal: React.FC<PrintBatchContractsModalProps> =
                         );
                       })}
                     </select>
-                    {effectivePeriodOverride && (
+                    {effectivePeriodOverride ? (
                       <p className="text-[11px] text-emerald-800 leading-snug">
                         ✓ Đối chiếu mức đóng BHXH: <strong className="font-mono font-bold text-emerald-950">{new Intl.NumberFormat('vi-VN').format(effectivePeriodOverride.matchedInsSalary)} đ</strong>
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-emerald-800 leading-snug">
+                        ✓ Đối chiếu mức đóng BHXH: <strong className="font-mono font-bold text-emerald-950">
+                          {new Intl.NumberFormat('vi-VN').format(
+                            getEffectiveInsuranceSalaryForPeriod(
+                              insurances?.find(i => i.employeeId === selectedEmployees[0].id),
+                              selectedEmployees[0],
+                              signDate,
+                              selectedEmployees[0].baseSalary
+                            )
+                          )} đ
+                        </strong>
                       </p>
                     )}
                   </div>

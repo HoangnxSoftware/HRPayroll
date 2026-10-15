@@ -135,6 +135,245 @@ export const getInsuranceRatesForMonth = (
 };
 
 /**
+ * Chuẩn hóa chuỗi tháng/năm về định dạng YYYY-MM chuẩn
+ * Hỗ trợ các định dạng: 'YYYY-MM', 'MM/YYYY', 'M/YYYY', 'YYYY/MM', 'MM-YYYY', 'YYYY-MM-DD', v.v.
+ */
+export const normalizeToMonthKey = (val?: string | number): string => {
+  if (!val) return '';
+  if (typeof val === 'number' || (!isNaN(Number(val)) && !String(val).includes('-') && !String(val).includes('/'))) {
+    const num = Number(val);
+    if (num > 30000 && num < 60000) {
+      const date = new Date((num - (25567 + 2)) * 86400 * 1000);
+      if (!isNaN(date.getTime())) {
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      }
+    }
+  }
+  let s = String(val).trim();
+  if (!s) return '';
+  s = s.replace(/^[Tt]háng\s*/i, '').replace(/^[Tt]\s*/i, '').trim();
+
+  // 1. Khớp định dạng 3 phần: DD[-/. ]MM[-/. ]YYYY (vd: 01/01/2026, 31/03/2026, 15-04-2026)
+  const dmy = s.match(/(?:^|[^\d])(\d{1,2})[-/. ](\d{1,2})[-/. ](19\d\d|20\d\d)(?:[^\d]|$)/);
+  if (dmy) {
+    const m = parseInt(dmy[2], 10);
+    const y = parseInt(dmy[3], 10);
+    if (m >= 1 && m <= 12) {
+      return `${y}-${String(m).padStart(2, '0')}`;
+    }
+  }
+
+  // 2. Khớp định dạng 3 phần năm đứng đầu: YYYY[-/. ]MM[-/. ]DD (vd: 2026-01-01, 2026/03/31)
+  const ymd = s.match(/(?:^|[^\d])(19\d\d|20\d\d)[-/. ](\d{1,2})[-/. ](\d{1,2})(?:[^\d]|$)/);
+  if (ymd) {
+    const y = parseInt(ymd[1], 10);
+    const m = parseInt(ymd[2], 10);
+    if (m >= 1 && m <= 12) {
+      return `${y}-${String(m).padStart(2, '0')}`;
+    }
+  }
+
+  // 3. Khớp định dạng 2 phần năm đứng đầu: YYYY[-/. ]MM (vd: 2026-01, 2026/04, 2026.04)
+  const yFirst = s.match(/(?:^|[^\d])(19\d\d|20\d\d)[-/. ](\d{1,2})(?:[^\d]|$)/);
+  if (yFirst) {
+    const y = parseInt(yFirst[1], 10);
+    const m = parseInt(yFirst[2], 10);
+    if (m >= 1 && m <= 12) {
+      return `${y}-${String(m).padStart(2, '0')}`;
+    }
+  }
+
+  // 4. Khớp định dạng 2 phần năm đứng cuối: MM[-/. ]YYYY hoặc MM năm YYYY (vd: 01/2026, 04/2026, 4/2026, 03 năm 2026)
+  const my = s.match(/(?:^|[^\d])(\d{1,2})\s*(?:[-/. ]|năm)\s*(19\d\d|20\d\d)(?:[^\d]|$)/i);
+  if (my) {
+    const m = parseInt(my[1], 10);
+    const y = parseInt(my[2], 10);
+    if (m >= 1 && m <= 12) {
+      return `${y}-${String(m).padStart(2, '0')}`;
+    }
+  }
+
+  return s.slice(0, 7);
+};
+
+/**
+ * Lấy mức lương đóng BHXH có hiệu lực của nhân viên theo tháng và năm cụ thể,
+ * ưu tiên lấy từ Quá trình đóng BHXH (insurance.history) theo từng giai đoạn fromMonth -> toMonth.
+ * Ví dụ: từ tháng 01/2026 đến tháng 03/2026 lương đóng là 5.000.000, từ 04/2026 đến nay là 8.000.000.
+ */
+export const getEffectiveInsuranceSalaryForMonth = (
+  insurance: InsuranceRecord | undefined,
+  employee: Employee | undefined,
+  month: number,
+  year: number
+): { salary: number; isParticipating: boolean; note?: string } => {
+  if (!insurance || !insurance.isParticipating) {
+    return { salary: 0, isParticipating: false };
+  }
+
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+
+  // 1. Kiểm tra Quá trình đóng BHXH (insurance.history) trước tiên
+  if (insurance.history && insurance.history.length > 0) {
+    // Sắp xếp các mốc lịch sử theo fromMonth tăng dần để tìm mốc bắt đầu sớm nhất
+    const sortedAsc = [...insurance.history].sort((a, b) => {
+      const ma = normalizeToMonthKey(a.fromMonth);
+      const mb = normalizeToMonthKey(b.fromMonth);
+      return ma.localeCompare(mb);
+    });
+
+    // Mốc thời gian bắt đầu đóng sớm nhất từ lịch sử đóng
+    const earliestFromM = normalizeToMonthKey(sortedAsc[0].fromMonth);
+
+    // Thời điểm bắt đầu tham gia thực tế (nếu có lịch sử thì mốc sớm nhất trong lịch sử là căn cứ bắt đầu)
+    const effectiveStart = earliestFromM || (insurance.startDate ? normalizeToMonthKey(insurance.startDate) : '');
+    if (effectiveStart && monthKey < effectiveStart) {
+      return { salary: 0, isParticipating: false, note: 'Chưa đến thời điểm bắt đầu đóng BHXH' };
+    }
+
+    // Sắp xếp các mốc lịch sử theo fromMonth giảm dần (ưu tiên mốc mới nhất trước)
+    const sortedDesc = [...insurance.history].sort((a, b) => {
+      const mb = normalizeToMonthKey(b.fromMonth);
+      const ma = normalizeToMonthKey(a.fromMonth);
+      return mb.localeCompare(ma);
+    });
+    
+    // Tìm mốc phù hợp: fromMonth <= monthKey && (!toMonth || monthKey <= toMonth)
+    const matched = sortedDesc.find(h => {
+      const fromM = normalizeToMonthKey(h.fromMonth);
+      const toM = h.toMonth ? normalizeToMonthKey(h.toMonth) : '';
+      if (!fromM) return false;
+      return monthKey >= fromM && (!toM || monthKey <= toM);
+    });
+
+    if (matched) {
+      return {
+        salary: Number(matched.salary) || 0,
+        isParticipating: true,
+        note: matched.note
+      };
+    }
+
+    // Nếu monthKey sau mốc mới nhất (kể cả khi mốc đó có toMonth và monthKey vượt qua toMonth)
+    const latest = sortedDesc[0];
+    const latestFromM = normalizeToMonthKey(latest.fromMonth);
+    const latestToM = latest.toMonth ? normalizeToMonthKey(latest.toMonth) : '';
+    if (latest && latestFromM && monthKey >= latestFromM) {
+      return {
+        salary: Number(latest.salary) || Number(insurance.insuranceSalary) || (employee ? Number(employee.baseSalary) : 0),
+        isParticipating: true,
+        note: latest.note || 'Theo mức đóng giai đoạn gần nhất'
+      };
+    }
+
+    // Nếu monthKey nhỏ hơn mốc sớm nhất nhưng không bị chặn bởi effectiveStart
+    const earliest = sortedAsc[0];
+    if (earliest) {
+      return {
+        salary: Number(earliest.salary) || Number(insurance.insuranceSalary) || (employee ? Number(employee.baseSalary) : 0),
+        isParticipating: true,
+        note: earliest.note
+      };
+    }
+  }
+
+  // 2. Nếu không có history, kiểm tra thời điểm bắt đầu tham gia nếu có
+  if (insurance.startDate) {
+    const startMonthKey = normalizeToMonthKey(insurance.startDate);
+    if (startMonthKey && monthKey < startMonthKey) {
+      return { salary: 0, isParticipating: false, note: 'Chưa đến thời điểm bắt đầu đóng' };
+    }
+  }
+
+  // 3. Mặc định: Lấy mức lương đóng ghi trên hồ sơ bảo hiểm hoặc lương cơ bản của nhân viên
+  const defaultSalary = Number(insurance.insuranceSalary) || (employee ? Number(employee.baseSalary) : 0);
+  return {
+    salary: defaultSalary,
+    isParticipating: true,
+    note: insurance.note
+  };
+};
+
+/**
+ * Lấy mức lương đóng BHXH đối chiếu cho một thời điểm hoặc giai đoạn cụ thể (fromMonth).
+ * Chuẩn hóa ngày tháng triệt để (YYYY-MM, MM/YYYY, DD/MM/YYYY) để so khớp chính xác với Quá trình đóng BHXH (insurance.history).
+ * Hỗ trợ in Hợp đồng lao động theo từng giai đoạn làm việc với mức lương đóng BHXH đối chiếu tương ứng.
+ */
+export const getEffectiveInsuranceSalaryForPeriod = (
+  insurance: InsuranceRecord | undefined,
+  employee: Employee | undefined,
+  periodFromMonth?: string,
+  fallbackBaseSalary?: number
+): number => {
+  const defaultFallback = fallbackBaseSalary !== undefined ? fallbackBaseSalary : (employee ? Number(employee.baseSalary) || 0 : 0);
+
+  if (!insurance) {
+    return defaultFallback;
+  }
+
+  // 1. Nếu có Quá trình đóng BHXH (insurance.history)
+  if (insurance.history && insurance.history.length > 0) {
+    const periodMonthKey = normalizeToMonthKey(periodFromMonth);
+
+    // Sắp xếp các mốc lịch sử theo fromMonth giảm dần (ưu tiên mốc gần nhất)
+    const sortedDesc = [...insurance.history].sort((a, b) => {
+      const mb = normalizeToMonthKey(b.fromMonth);
+      const ma = normalizeToMonthKey(a.fromMonth);
+      return mb.localeCompare(ma);
+    });
+
+    if (periodMonthKey) {
+      // 1.1 Tìm mốc bao trùm: fromMonth <= periodMonthKey && (!toMonth || periodMonthKey <= toMonth)
+      const matched = sortedDesc.find(h => {
+        const fromM = normalizeToMonthKey(h.fromMonth);
+        const toM = h.toMonth ? normalizeToMonthKey(h.toMonth) : '';
+        if (!fromM) return false;
+        return periodMonthKey >= fromM && (!toM || periodMonthKey <= toM);
+      });
+
+      if (matched && Number(matched.salary) > 0) {
+        return Number(matched.salary);
+      }
+
+      // 1.2 Nếu periodMonthKey lớn hơn mốc mới nhất (kể cả mốc đó có toMonth)
+      const latest = sortedDesc[0];
+      const latestFromM = normalizeToMonthKey(latest.fromMonth);
+      if (latest && latestFromM && periodMonthKey >= latestFromM && Number(latest.salary) > 0) {
+        return Number(latest.salary);
+      }
+
+      // 1.3 Nếu periodMonthKey nhỏ hơn mốc sớm nhất, lấy mốc sớm nhất đó
+      const sortedAsc = [...insurance.history].sort((a, b) => {
+        const ma = normalizeToMonthKey(a.fromMonth);
+        const mb = normalizeToMonthKey(b.fromMonth);
+        return ma.localeCompare(mb);
+      });
+      const earliest = sortedAsc[0];
+      const earliestFromM = normalizeToMonthKey(earliest.fromMonth);
+      if (earliest && earliestFromM && periodMonthKey <= earliestFromM && Number(earliest.salary) > 0) {
+        return Number(earliest.salary);
+      }
+    } else {
+      // Nếu không có periodMonthKey, lấy mốc mới nhất đang áp dụng hoặc mốc đầu tiên có lương
+      const ongoing = sortedDesc.find(h => !h.toMonth);
+      if (ongoing && Number(ongoing.salary) > 0) {
+        return Number(ongoing.salary);
+      }
+      if (sortedDesc[0] && Number(sortedDesc[0].salary) > 0) {
+        return Number(sortedDesc[0].salary);
+      }
+    }
+  }
+
+  // 2. Nếu không có lịch sử hoặc không tìm thấy, lấy insurance.insuranceSalary nếu có
+  if (insurance.insuranceSalary && Number(insurance.insuranceSalary) > 0) {
+    return Number(insurance.insuranceSalary);
+  }
+
+  return defaultFallback;
+};
+
+/**
  * Tính số ngày công chuẩn trong tháng dựa vào lịch thực tế và chính sách ngày nghỉ cố định
  * - all_sundays: Nghỉ tất cả các ngày Chủ nhật (CN)
  * - half_sundays: Nghỉ 2 Chủ nhật trong tháng (1/2 CN, 2 CN còn lại đi làm bình thường)
@@ -1021,27 +1260,15 @@ export const calculateEmployeePayroll = (
   let totalInsuranceEmployer = 0;
   
   if (insurance && insurance.isParticipating) {
-    const curMonthKey = `${parsedYear}-${String(parsedMonth).padStart(2, '0')}`;
-    let participatesThisMonth = true;
-
-    if (insurance.startDate) {
-      const startMonthKey = insurance.startDate.slice(0, 7);
-      if (curMonthKey < startMonthKey) {
-        participatesThisMonth = false;
-      }
-    }
+    const { salary: effSalary, isParticipating: participatesThisMonth } = getEffectiveInsuranceSalaryForMonth(
+      insurance,
+      employee,
+      parsedMonth,
+      parsedYear
+    );
 
     if (participatesThisMonth) {
-      let effectiveSalary = insurance.insuranceSalary || employee.baseSalary;
-      if (insurance.history && insurance.history.length > 0) {
-        const matched = insurance.history.find(h => {
-          return curMonthKey >= h.fromMonth && (!h.toMonth || curMonthKey <= h.toMonth);
-        });
-        if (matched) {
-          effectiveSalary = matched.salary;
-        }
-      }
-      insuranceSalary = effectiveSalary;
+      insuranceSalary = effSalary;
 
       // Lấy tỷ lệ đóng BHXH có hiệu lực theo giai đoạn thiết lập cho tháng/năm này
       const monthRates = getInsuranceRatesForMonth(settings, parsedYear, parsedMonth);

@@ -194,7 +194,7 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const canEditPayroll = custom.canEditPayroll ?? (currentUserRole === 'admin' || currentUserRole === 'accountant' || currentUserRole === 'payroll');
   const canViewPayroll = custom.canViewPayroll ?? (currentUserRole !== 'employee');
 
-  const canEditEmployees = custom.canEditEmployees ?? (currentUserRole === 'admin' || currentUserRole === 'accountant');
+  const canEditEmployees = custom.canEditEmployees ?? (currentUserRole === 'admin' || currentUserRole === 'accountant' || currentUserRole === 'payroll');
   const canViewEmployees = custom.canViewEmployees ?? (currentUserRole !== 'employee');
 
   const canEditTimekeeping = custom.canEditTimekeeping ?? (currentUserRole === 'admin' || currentUserRole === 'accountant' || currentUserRole === 'payroll');

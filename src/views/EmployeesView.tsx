@@ -26,7 +26,7 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { Employee, Department, Position, SystemSettings, WorkHistoryItem, WorkStatus, SalaryCalculationBasis, InsuranceRecord } from '../types';
-import { formatVND, getEmployeeWorkStatusDetails, syncEmployeeWorkHistory } from '../utils/payrollCalculator';
+import { formatVND, getEmployeeWorkStatusDetails, syncEmployeeWorkHistory, getEffectiveInsuranceSalaryForPeriod } from '../utils/payrollCalculator';
 import { exportEmployeesToExcel, downloadEmployeeTemplate, readEmployeeExcel } from '../utils/excelHelper';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintEmployeesModal } from '../components/PrintEmployeesModal';
@@ -340,8 +340,8 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
 
     const currentHistory = workHistoryTarget.workHistory ? [...workHistoryTarget.workHistory] : [];
     const updatedHistory = currentHistory.filter((h, idx) => {
-      if (itemId && h.id) return h.id !== itemId;
-      if (itemIndex !== null) return idx !== itemIndex;
+      if (itemIndex !== null && idx === itemIndex) return false;
+      if (itemId && h.id && h.id === itemId) return false;
       return true;
     });
 
@@ -363,21 +363,14 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   // In Hợp đồng lao động theo từng giai đoạn & đối chiếu mức đóng BHXH
   const handlePrintContractForPeriod = (item: WorkHistoryItem) => {
     if (!workHistoryTarget) return;
-    // Đối chiếu mức đóng BHXH trong Quá trình & Mức đóng BHXH
+    // Đối chiếu mức đóng BHXH từ Quá trình đóng BHXH (insurance.history) theo chuẩn hóa tháng
     const matchingIns = insurances?.find(i => i.employeeId === workHistoryTarget.id);
-    let matchedInsSalary = matchingIns?.insuranceSalary || item.baseSalary;
-    if (matchingIns?.history && matchingIns.history.length > 0) {
-      const periodMonth = item.fromMonth.slice(0, 7);
-      const foundHist = matchingIns.history.find(h => {
-        if (h.fromMonth <= periodMonth) {
-          if (!h.toMonth || h.toMonth >= periodMonth) return true;
-        }
-        return false;
-      }) || matchingIns.history[matchingIns.history.length - 1];
-      if (foundHist) {
-        matchedInsSalary = foundHist.salary;
-      }
-    }
+    const matchedInsSalary = getEffectiveInsuranceSalaryForPeriod(
+      matchingIns,
+      workHistoryTarget,
+      item.fromMonth,
+      item.baseSalary
+    );
 
     setPeriodContractOverride({
       item,
@@ -943,7 +936,11 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                                 <Edit3 className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => onDeleteEmployee(emp.id)}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeleteEmployee(emp.id);
+                                }}
                                 className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                                 title="Xóa nhân viên"
                               >
@@ -990,6 +987,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           initialSelectedEmployeeIds={batchModalSelectedIds}
           initialDocType={batchModalInitialDocType}
           periodOverride={periodContractOverride}
+          insurances={insurances}
         />
       )}
 

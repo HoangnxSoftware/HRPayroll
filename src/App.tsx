@@ -22,7 +22,7 @@ import {
 } from './types';
 import { calculateEmployeePayroll, isEmployeeActiveInMonth } from './utils/payrollCalculator';
 import { FullPayrollData, importFullDataFromGoogleSheets } from './services/googleSheetsService';
-import { getCurrentUser } from './services/authService';
+import { getCurrentUser, hasValidGoogleToken } from './services/authService';
 import {
   sanitizeSettings,
   sanitizeEmployees,
@@ -446,16 +446,34 @@ function PayrollAppContent() {
         return true;
       }
       return false;
-    } catch (err) {
-      console.error('Lỗi khi nạp dữ liệu từ Google Sheets:', err);
-      throw err;
+    } catch (err: any) {
+      const isAuthErr = !hasValidGoogleToken() || err?.message?.includes('Chưa đăng nhập Google') || err?.message?.includes('hết hạn');
+      if (isAuthErr) {
+        console.warn('Google Sheets: Phiên làm việc Google chưa được kích hoạt hoặc đã hết hạn.');
+        setSyncState(prev => ({
+          ...prev,
+          isConnected: false,
+          syncMessage: 'Phiên đăng nhập Google đã hết hạn. Vui lòng kết nối lại tài khoản Google.'
+        }));
+        return false;
+      }
+      console.warn('Lỗi khi nạp dữ liệu từ Google Sheets:', err);
+      return false;
     }
   };
 
-  // Tự động đồng bộ từ Google Sheets nếu đã kết nối trước đó (chỉ chạy khi không ở chế độ dữ liệu mẫu)
+  // Tự động đồng bộ từ Google Sheets nếu đã kết nối trước đó (chỉ chạy khi đã đăng nhập Google hợp lệ và không ở chế độ dữ liệu mẫu)
   useEffect(() => {
     const isDemo = syncState.isDemoMode || localStorage.getItem('payroll_is_demo_mode') === 'true';
     if (!isDemo && syncState.isConnected && syncState.spreadsheetId) {
+      if (!hasValidGoogleToken()) {
+        setSyncState(prev => ({
+          ...prev,
+          isConnected: false,
+          syncMessage: 'Vui lòng đăng nhập Google để tiếp tục đồng bộ dữ liệu.'
+        }));
+        return;
+      }
       handleLoadDataFromSpreadsheet(syncState.spreadsheetId, syncState.spreadsheetName || undefined).catch(err => {
         console.warn('Không thể tự động tải từ Google Sheets khi khởi động:', err);
       });
@@ -576,7 +594,7 @@ function PayrollAppContent() {
   // Insurance update
   const handleUpdateInsurance = (ins: InsuranceRecord) => {
     setInsurances(prev => {
-      const idx = prev.findIndex(i => i.id === ins.id);
+      const idx = prev.findIndex(i => i.id === ins.id || (Boolean(ins.employeeId) && i.employeeId === ins.employeeId));
       if (idx >= 0) {
         const copy = [...prev];
         copy[idx] = ins;

@@ -334,7 +334,11 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
                               <Edit3 className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => onDeleteAllowance(item.id)}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteAllowance(item.id);
+                              }}
                               className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg cursor-pointer"
                             >
                               <Trash2 className="w-4 h-4" />

@@ -1,7 +1,7 @@
-import React from 'react';
-import { Printer, X, ShieldCheck, Download } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Printer, X, ShieldCheck, Download, Calendar } from 'lucide-react';
 import { Employee, InsuranceRecord, SystemSettings } from '../types';
-import { formatVND } from '../utils/payrollCalculator';
+import { formatVND, getEffectiveInsuranceSalaryForMonth, getInsuranceRatesForMonth, getAvailableYears, isEmployeeActiveInMonth } from '../utils/payrollCalculator';
 import * as XLSX from 'xlsx';
 
 interface PrintInsuranceModalProps {
@@ -10,6 +10,8 @@ interface PrintInsuranceModalProps {
   insurances: InsuranceRecord[];
   employees: Employee[];
   settings: SystemSettings;
+  customMonth?: number;
+  customYear?: number;
 }
 
 export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
@@ -18,9 +20,22 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
   insurances,
   employees,
   settings,
+  customMonth,
+  customYear,
 }) => {
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => customMonth || settings.currentMonth || 1);
+  const [selectedYear, setSelectedYear] = useState<number>(() => customYear || settings.currentYear || 2026);
+
+  useEffect(() => {
+    if (customMonth) setSelectedMonth(customMonth);
+  }, [customMonth]);
+
+  useEffect(() => {
+    if (customYear) setSelectedYear(customYear);
+  }, [customYear]);
+
   // Tập hợp các số CCCD NLĐ bị trùng lặp - Phải gọi hook TRƯỚC mọi return để tuân thủ React Rules of Hooks
-  const duplicateIdCards = React.useMemo(() => {
+  const duplicateIdCards = useMemo(() => {
     const counts = new Map<string, number>();
     employees.forEach(e => {
       const cccd = (e.idCardNumber || '').trim();
@@ -33,84 +48,109 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
     return dupSet;
   }, [employees]);
 
-  if (!isOpen) return null;
+  const empMap = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees]);
+  const posMap = useMemo(() => new Map(settings.positions.map(p => [p.id, p.name])), [settings.positions]);
+  const depMap = useMemo(() => new Map(settings.departments.map(d => [d.id, d.name])), [settings.departments]);
 
-  const empMap = new Map(employees.map(e => [e.id, e]));
-  const posMap = new Map(settings.positions.map(p => [p.id, p.name]));
-  const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
+  // Lấy tỷ lệ đóng BHXH chuẩn có hiệu lực cho tháng & năm đang chọn
+  const monthRates = useMemo(() => {
+    return getInsuranceRatesForMonth(settings, selectedYear, selectedMonth);
+  }, [settings, selectedYear, selectedMonth]);
 
-  // System rates
-  const socRateEmp = settings.socialInsRateEmployee ?? 8;
-  const medRateEmp = settings.healthInsRateEmployee ?? 1.5;
-  const unempRateEmp = settings.unemploymentInsRateEmployee ?? 1;
-  const totalRateEmp = socRateEmp + medRateEmp + unempRateEmp;
+  const socRateEmp = monthRates.socialInsRateEmployee;
+  const medRateEmp = monthRates.healthInsRateEmployee;
+  const unempRateEmp = monthRates.unemploymentInsRateEmployee;
+  const totalRateEmp = monthRates.totalEmpRate;
 
-  const socRateEr = settings.socialInsRateEmployer ?? 17.5;
-  const medRateEr = settings.healthInsRateEmployer ?? 3;
-  const unempRateEr = settings.unemploymentInsRateEmployer ?? 1;
-  const unionRateEr = settings.tradeUnionRateEmployer ?? 2;
-  const totalRateEr = socRateEr + medRateEr + unempRateEr + unionRateEr;
+  const socRateEr = monthRates.socialInsRateEmployer;
+  const medRateEr = monthRates.healthInsRateEmployer;
+  const unempRateEr = monthRates.unemploymentInsRateEmployer;
+  const unionRateEr = monthRates.tradeUnionRateEmployer;
+  const totalRateEr = monthRates.totalErRate;
 
-  // Filter only participating records or all
-  const dataRows = insurances.map(ins => {
-    const emp = empMap.get(ins.employeeId);
-    const salary = ins.isParticipating ? (ins.insuranceSalary || 0) : 0;
+  // Tính toán số liệu bảo hiểm cho từng nhân sự trong tháng & năm được chọn
+  // ĐẶC BIỆT: Cột Lương đóng BHXH lấy chính xác theo Quá trình đóng BHXH (ins.history)
+  const dataRows = useMemo(() => {
+    return employees.map(emp => {
+      const ins = insurances.find(i => i.employeeId === emp.id) || {
+        id: `ins-${emp.id}`,
+        employeeId: emp.id,
+        isParticipating: true,
+        insuranceSalary: emp.baseSalary,
+        startDate: '',
+        history: [],
+        note: ''
+      };
+      
+      // Lấy mức lương đóng BHXH có hiệu lực trong tháng/năm này từ Quá trình đóng BHXH (history)
+      const { salary: effectiveSalary, isParticipating, note: historyNote } = getEffectiveInsuranceSalaryForMonth(
+        ins,
+        emp,
+        selectedMonth,
+        selectedYear
+      );
 
-    // Custom rates or default
-    const rSocEmp = ins.customSocialRate !== undefined ? ins.customSocialRate : socRateEmp;
-    const rMedEmp = ins.customHealthRate !== undefined ? ins.customHealthRate : medRateEmp;
-    const rUnempEmp = ins.customUnempRate !== undefined ? ins.customUnempRate : unempRateEmp;
+      const isActive = isEmployeeActiveInMonth(emp, selectedMonth, selectedYear);
+      const isPart = ins.isParticipating && isParticipating && isActive;
+      const salary = isPart ? effectiveSalary : 0;
 
-    const rSocEr = socRateEr;
-    const rMedEr = medRateEr;
-    const rUnempEr = unempRateEr;
-    const rUnionEr = unionRateEr;
+      // Custom rates or default for this month
+      const rSocEmp = ins.customSocialRate !== undefined ? ins.customSocialRate : socRateEmp;
+      const rMedEmp = ins.customHealthRate !== undefined ? ins.customHealthRate : medRateEmp;
+      const rUnempEmp = ins.customUnempRate !== undefined ? ins.customUnempRate : unempRateEmp;
 
-    const empSoc = Math.round(salary * (rSocEmp / 100));
-    const empMed = Math.round(salary * (rMedEmp / 100));
-    const empUnemp = Math.round(salary * (rUnempEmp / 100));
-    const empTotal = empSoc + empMed + empUnemp;
+      const rSocEr = socRateEr;
+      const rMedEr = medRateEr;
+      const rUnempEr = unempRateEr;
+      const rUnionEr = unionRateEr;
 
-    const erSoc = Math.round(salary * (rSocEr / 100));
-    const erMed = Math.round(salary * (rMedEr / 100));
-    const erUnemp = Math.round(salary * (rUnempEr / 100));
-    const erUnion = Math.round(salary * (rUnionEr / 100));
-    const erTotal = erSoc + erMed + erUnemp + erUnion;
+      const empSoc = Math.round(salary * (rSocEmp / 100));
+      const empMed = Math.round(salary * (rMedEmp / 100));
+      const empUnemp = Math.round(salary * (rUnempEmp / 100));
+      const empTotal = empSoc + empMed + empUnemp;
 
-    const totalContribution = empTotal + erTotal;
+      const erSoc = Math.round(salary * (rSocEr / 100));
+      const erMed = Math.round(salary * (rMedEr / 100));
+      const erUnemp = Math.round(salary * (rUnempEr / 100));
+      const erUnion = Math.round(salary * (rUnionEr / 100));
+      const erTotal = erSoc + erMed + erUnemp + erUnion;
 
-    return {
-      ins,
-      emp,
-      salary,
-      isParticipating: ins.isParticipating,
-      empSoc,
-      empMed,
-      empUnemp,
-      empTotal,
-      erSoc,
-      erMed,
-      erUnemp,
-      erUnion,
-      erTotal,
-      totalContribution
-    };
-  });
+      const totalContribution = empTotal + erTotal;
 
-  const grandSalary = dataRows.reduce((sum, r) => sum + r.salary, 0);
-  const grandEmpSoc = dataRows.reduce((sum, r) => sum + r.empSoc, 0);
-  const grandEmpMed = dataRows.reduce((sum, r) => sum + r.empMed, 0);
-  const grandEmpUnemp = dataRows.reduce((sum, r) => sum + r.empUnemp, 0);
-  const grandEmpTotal = dataRows.reduce((sum, r) => sum + r.empTotal, 0);
+      return {
+        ins,
+        emp,
+        salary,
+        isParticipating: isPart,
+        historyNote,
+        empSoc,
+        empMed,
+        empUnemp,
+        empTotal,
+        erSoc,
+        erMed,
+        erUnemp,
+        erUnion,
+        erTotal,
+        totalContribution
+      };
+    });
+  }, [employees, insurances, selectedMonth, selectedYear, socRateEmp, medRateEmp, unempRateEmp, socRateEr, medRateEr, unempRateEr, unionRateEr]);
 
-  const grandErSoc = dataRows.reduce((sum, r) => sum + r.erSoc, 0);
-  const grandErMed = dataRows.reduce((sum, r) => sum + r.erMed, 0);
-  const grandErUnemp = dataRows.reduce((sum, r) => sum + r.erUnemp, 0);
-  const grandErUnion = dataRows.reduce((sum, r) => sum + r.erUnion, 0);
-  const grandErTotal = dataRows.reduce((sum, r) => sum + r.erTotal, 0);
+  const grandSalary = useMemo(() => dataRows.reduce((sum, r) => sum + r.salary, 0), [dataRows]);
+  const grandEmpSoc = useMemo(() => dataRows.reduce((sum, r) => sum + r.empSoc, 0), [dataRows]);
+  const grandEmpMed = useMemo(() => dataRows.reduce((sum, r) => sum + r.empMed, 0), [dataRows]);
+  const grandEmpUnemp = useMemo(() => dataRows.reduce((sum, r) => sum + r.empUnemp, 0), [dataRows]);
+  const grandEmpTotal = useMemo(() => dataRows.reduce((sum, r) => sum + r.empTotal, 0), [dataRows]);
 
-  const grandTotal = dataRows.reduce((sum, r) => sum + r.totalContribution, 0);
-  const participatingCount = dataRows.filter(r => r.isParticipating).length;
+  const grandErSoc = useMemo(() => dataRows.reduce((sum, r) => sum + r.erSoc, 0), [dataRows]);
+  const grandErMed = useMemo(() => dataRows.reduce((sum, r) => sum + r.erMed, 0), [dataRows]);
+  const grandErUnemp = useMemo(() => dataRows.reduce((sum, r) => sum + r.erUnemp, 0), [dataRows]);
+  const grandErUnion = useMemo(() => dataRows.reduce((sum, r) => sum + r.erUnion, 0), [dataRows]);
+  const grandErTotal = useMemo(() => dataRows.reduce((sum, r) => sum + r.erTotal, 0), [dataRows]);
+
+  const grandTotal = useMemo(() => dataRows.reduce((sum, r) => sum + r.totalContribution, 0), [dataRows]);
+  const participatingCount = useMemo(() => dataRows.filter(r => r.isParticipating).length, [dataRows]);
 
   const handlePrint = () => {
     window.print();
@@ -123,7 +163,7 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
       [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
       [],
       [`BẢNG TỔNG HỢP TRÍCH NỘP BẢO HIỂM XÃ HỘI, BHYT, BHTN & KINH PHÍ CÔNG ĐOÀN`],
-      [`Tháng ${settings.currentMonth} năm ${settings.currentYear}`],
+      [`Tháng ${selectedMonth} năm ${selectedYear}`],
       [],
       [
         'STT',
@@ -132,16 +172,17 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
         'Họ và Tên',
         'Phòng Ban',
         'Lương Đóng BHXH',
-        'BHXH NLĐ (8%)',
-        'BHYT NLĐ (1.5%)',
-        'BHTN NLĐ (1%)',
+        `BHXH NLĐ (${socRateEmp}%)`,
+        `BHYT NLĐ (${medRateEmp}%)`,
+        `BHTN NLĐ (${unempRateEmp}%)`,
         'Tổng NLĐ Đóng',
-        'BHXH DN (17.5%)',
-        'BHYT DN (3%)',
-        'BHTN DN (1%)',
-        'KPCĐ (2%)',
+        `BHXH DN (${socRateEr}%)`,
+        `BHYT DN (${medRateEr}%)`,
+        `BHTN DN (${unempRateEr}%)`,
+        `KPCĐ (${unionRateEr}%)`,
         'Tổng DN Đóng',
-        'Tổng Số Tiền Trích Nộp'
+        'Tổng Số Tiền Trích Nộp',
+        'Ghi Chú'
       ],
       ...dataRows.map((r, idx) => [
         idx + 1,
@@ -159,7 +200,8 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
         r.erUnemp,
         r.erUnion,
         r.erTotal,
-        r.totalContribution
+        r.totalContribution,
+        r.historyNote || r.ins.note || ''
       ]),
       [
         'TỔNG CỘNG',
@@ -177,7 +219,8 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
         grandErUnemp,
         grandErUnion,
         grandErTotal,
-        grandTotal
+        grandTotal,
+        ''
       ],
       [],
       [],
@@ -207,21 +250,50 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
     const ws = XLSX.utils.aoa_to_sheet(excelRows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Trich_Nop_BHXH');
-    XLSX.writeFile(wb, `Trich_Nop_BHXH_T${settings.currentMonth}_${settings.currentYear}.xlsx`);
+    XLSX.writeFile(wb, `Trich_Nop_BHXH_T${selectedMonth}_${selectedYear}.xlsx`);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[96vh] flex flex-col overflow-hidden">
         {/* Top Control Bar */}
-        <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between print:hidden shrink-0">
-          <div className="flex items-center gap-2.5">
-            <ShieldCheck className="w-5 h-5 text-emerald-400" />
+        <div className="px-6 py-4 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3 print:hidden shrink-0">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
             <div>
-              <h3 className="font-bold text-base">In Danh Sách Trích Nộp BHXH, BHYT, BHTN & KPCĐ</h3>
+              <h3 className="font-bold text-base">In Bảng Tổng Hợp Trích Nộp BHXH, BHYT, BHTN & KPCĐ</h3>
               <p className="text-xs text-slate-400">
-                Khổ giấy A4 Ngang (Landscape) • Tháng {settings.currentMonth}/{settings.currentYear} • {participatingCount}/{insurances.length} người tham gia
+                Khổ giấy A4 Ngang • Tháng {selectedMonth}/{selectedYear} • {participatingCount}/{insurances.length} người tham gia
               </p>
+            </div>
+
+            {/* Bộ chọn tháng và năm trực tiếp trên thanh công cụ in */}
+            <div className="flex items-center gap-2 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700 ml-2">
+              <Calendar className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-xs text-slate-300 font-semibold">Xem Tháng:</span>
+              <select
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(Number(e.target.value))}
+                className="bg-slate-900 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-slate-600 cursor-pointer focus:ring-1 focus:ring-emerald-500"
+              >
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                  <option key={m} value={m}>Tháng {m}</option>
+                ))}
+              </select>
+              <span className="text-xs text-slate-300 font-semibold">Năm:</span>
+              <select
+                value={selectedYear}
+                onChange={e => setSelectedYear(Number(e.target.value))}
+                className="bg-slate-900 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-slate-600 cursor-pointer focus:ring-1 focus:ring-emerald-500"
+              >
+                {getAvailableYears(selectedYear).map(y => (
+                  <option key={y} value={y}>Năm {y}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -287,7 +359,7 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
               </div>
               <div className="text-right">
                 <div className="text-xs font-semibold text-slate-800">
-                  Kỳ trích nộp: Tháng {settings.currentMonth}/{settings.currentYear}
+                  Kỳ trích nộp: Tháng {selectedMonth}/{selectedYear}
                 </div>
                 <div className="text-[10px] text-emerald-800 font-bold mt-0.5">
                   Tỷ lệ chuẩn: NLĐ {totalRateEmp}% • Doanh nghiệp {totalRateEr}%
@@ -301,7 +373,7 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
                 BẢNG TỔNG HỢP TRÍCH NỘP BẢO HIỂM XÃ HỘI, BHYT, BHTN & KINH PHÍ CÔNG ĐOÀN
               </h1>
               <p className="text-[11px] text-slate-600 italic mt-0.5">
-                Tháng {settings.currentMonth} năm {settings.currentYear} (Tham gia: {participatingCount} / {insurances.length} nhân sự)
+                Tháng {selectedMonth} năm {selectedYear} (Tham gia: {participatingCount} / {insurances.length} nhân sự)
               </p>
             </div>
 
@@ -369,7 +441,7 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
                     const isDuplicateCccd = emp?.idCardNumber ? duplicateIdCards.has(emp.idCardNumber.trim()) : false;
 
                     return (
-                      <tr key={row.ins.id} className="hover:bg-slate-50">
+                      <tr key={row.emp?.id || row.ins.id} className="hover:bg-slate-50">
                         <td className="border border-slate-400 p-0.5">{idx + 1}</td>
                         <td className="border border-slate-400 p-0.5 font-mono font-semibold">{emp?.employeeCode || '-'}</td>
                         <td className="border border-slate-400 p-0.5 font-mono text-center">
@@ -407,8 +479,8 @@ export const PrintInsuranceModal: React.FC<PrintInsuranceModalProps> = ({
                         <td className="border border-slate-400 p-0.5 text-right font-mono font-black text-emerald-900 bg-emerald-50">
                           {row.isParticipating ? formatVND(row.totalContribution) : '-'}
                         </td>
-                        <td className="border border-slate-400 p-0.5 text-slate-500 text-[8px] truncate">
-                          {!row.isParticipating ? 'Không tham gia' : (row.ins.note || '')}
+                        <td className="border border-slate-400 p-0.5 text-slate-600 text-[8px] truncate" title={row.historyNote || row.ins.note || ''}>
+                          {!row.isParticipating ? 'Không tham gia' : (row.historyNote || row.ins.note || '')}
                         </td>
                       </tr>
                     );

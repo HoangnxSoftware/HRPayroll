@@ -25,8 +25,14 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150 relative">
+    <div 
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+      onClick={onCancel}
+    >
+      <div 
+        className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150 relative"
+        onClick={e => e.stopPropagation()}
+      >
         <button
           type="button"
           onClick={onCancel}
@@ -52,14 +58,22 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         <div className="flex items-center justify-end gap-2.5">
           <button
             type="button"
-            onClick={onCancel}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onCancel();
+            }}
             className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
           >
             {cancelLabel}
           </button>
           <button
             type="button"
-            onClick={onConfirm}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onConfirm();
+            }}
             className={`px-4 py-2 text-white font-bold rounded-xl text-xs shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
               isDanger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'
             }`}

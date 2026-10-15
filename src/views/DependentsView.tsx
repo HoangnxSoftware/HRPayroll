@@ -423,7 +423,11 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
                               <Edit3 className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => onDeleteDependent(dep.id)}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteDependent(dep.id);
+                              }}
                               className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg cursor-pointer"
                             >
                               <Trash2 className="w-4 h-4" />
