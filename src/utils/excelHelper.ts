@@ -936,7 +936,7 @@ export const exportMealAttendanceToExcel = (
       exemptAmount = canteenCost;
       taxableCash = 0;
     } else if (effectivePlan === 'cash') {
-      cashAllowance = flatAmount;
+      cashAllowance = reg?.cashMethod === 'by_attendance' ? (actualMeals * rate) : flatAmount;
       totalCost = cashAllowance;
       if (mealExemptMode === 'fully_exempt') {
         exemptAmount = cashAllowance;
@@ -956,8 +956,8 @@ export const exportMealAttendanceToExcel = (
       'Số CCCD': emp.idCardNumber || '',
       'Họ và Tên': emp.fullName,
       'Phòng Ban': depMap.get(emp.departmentId) || '',
-      'Hình Thức Ăn': effectivePlan === 'canteen' ? 'Ăn tại bếp' : effectivePlan === 'cash' ? 'Chi tiền mặt' : 'Không ăn',
-      'Đơn Giá / Suất (đ)': effectivePlan === 'canteen' ? rate : 0,
+      'Hình Thức Ăn': effectivePlan === 'canteen' ? 'Ăn tại bếp' : effectivePlan === 'cash' ? (reg?.cashMethod === 'by_attendance' ? 'Tiền mặt (Chấm công)' : 'Tiền mặt (Tự điền)') : 'Không ăn',
+      'Đơn Giá / Suất (đ)': (effectivePlan === 'canteen' || (effectivePlan === 'cash' && reg?.cashMethod === 'by_attendance')) ? rate : 0,
       'Số Bữa Trưa (suất)': tk?.totalMealsLunch || 0,
       'Số Bữa Chiều (suất)': tk?.totalMealsAfternoon || 0,
       'Số Bữa Tối (suất)': tk?.totalMealsDinner || 0,

@@ -859,7 +859,10 @@ export const exportDataToGoogleSheets = async (
 
     const tk = data.timekeepings.find(t => t.employeeId === reg.employeeId && (String(t.month) === mMonth || String(t.month) === String(data.settings.currentMonth)));
     const plan = reg.mealType === 'canteen' ? 'registered' : reg.mealType === 'cash' ? 'cash' : (reg.planType || 'registered');
-    const planLabel = plan === 'registered' ? 'Ăn ca tại bếp' : plan === 'cash' ? 'Nhận tiền mặt' : 'Không đăng ký';
+    const planLabel = plan === 'registered' ? 'Ăn ca tại bếp' : plan === 'cash' ? (reg.cashMethod === 'by_attendance' ? 'Nhận tiền mặt (Theo chấm công)' : 'Nhận tiền mặt (Tự điền)') : 'Không đăng ký';
+
+    const effectiveRate = reg.ratePerMeal || reg.customRatePerMeal || data.settings.standardMealPerDay || 35000;
+    const cashVal = reg.cashMethod === 'by_attendance' ? ((tk?.totalMeals || 0) * effectiveRate) : (reg.monthlyAllowance || reg.monthlyFlatAmount || data.settings.monthlyMealFlatRate || 1200000);
 
     mealRowsData.push([
       emp.employeeCode,
@@ -869,12 +872,12 @@ export const exportDataToGoogleSheets = async (
       reg.registerLunch !== false ? 'Có' : 'Không',
       reg.registerAfternoon ? 'Có' : 'Không',
       reg.registerDinner ? 'Có' : 'Không',
-      String(plan === 'registered' ? (tk?.totalMeals || 0) : 0),
+      String(plan === 'registered' || (plan === 'cash' && reg.cashMethod === 'by_attendance') ? (tk?.totalMeals || 0) : 0),
       String(tk?.totalMealsLunch || 0),
       String(tk?.totalMealsAfternoon || 0),
       String(tk?.totalMealsDinner || 0),
-      String(reg.ratePerMeal || reg.customRatePerMeal || data.settings.standardMealPerDay || 35000),
-      String(plan === 'cash' ? (reg.monthlyAllowance || reg.monthlyFlatAmount || data.settings.monthlyMealFlatRate || 1200000) : 0),
+      String(effectiveRate),
+      String(plan === 'cash' ? cashVal : 0),
       reg.note || '',
       reg.id
     ]);
@@ -2068,6 +2071,7 @@ export const importFullDataFromGoogleSheets = async (
           const planLabel = String(r[3] || '').toLowerCase();
           const planType = planLabel.includes('bếp') ? 'registered' : planLabel.includes('tiền') ? 'cash' : 'none';
           const mealType = planType === 'registered' ? 'canteen' : planType === 'cash' ? 'cash' : 'none';
+          const cashMethod: 'fixed' | 'by_attendance' = (planLabel.includes('chấm công') || planLabel.includes('bữa thực tế')) ? 'by_attendance' : 'fixed';
 
           // r[4]: ĐK Ăn Trưa, r[5]: ĐK Ăn Chiều, r[6]: ĐK Ăn Tối
           const isLunch = r[4] !== undefined ? !String(r[4]).toLowerCase().includes('không') : true;
@@ -2085,6 +2089,7 @@ export const importFullDataFromGoogleSheets = async (
             month: String(r[2] || `${result.settings?.currentYear}-${String(result.settings?.currentMonth).padStart(2, '0')}`).trim(),
             planType,
             mealType,
+            cashMethod,
             registerLunch: isLunch,
             registerAfternoon: isAfternoon,
             registerDinner: isDinner,

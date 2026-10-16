@@ -288,6 +288,7 @@ export interface MealRegistration {
   mealType?: MealType | MealPlanType;
   ratePerMeal?: number;
   monthlyAllowance?: number;
+  cashMethod?: 'fixed' | 'by_attendance'; // 'fixed': Số tự điền | 'by_attendance': Theo bữa thực tế (từ chấm công) × Đơn giá/Suất
   note?: string;
 
   // Đăng ký ăn ca theo từng bữa trong tháng (Trưa / Chiều / Tối)

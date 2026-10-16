@@ -59,7 +59,7 @@ export const PrintMealModal: React.FC<PrintMealModalProps> = ({
       canteenCost = actualMeals * effectiveRate;
       totalCost = canteenCost;
     } else if (effectiveMealType === 'cash') {
-      cashAllowance = effectiveAllowance;
+      cashAllowance = reg.cashMethod === 'by_attendance' ? (actualMeals * effectiveRate) : effectiveAllowance;
       totalCost = cashAllowance;
     }
 
@@ -88,6 +88,7 @@ export const PrintMealModal: React.FC<PrintMealModalProps> = ({
       idx: idx + 1,
       emp,
       mealType: effectiveMealType,
+      cashMethod: reg.cashMethod || 'fixed',
       rate: effectiveRate,
       actualMeals: effectiveMealType === 'none' ? 0 : actualMeals,
       canteenCost,
@@ -257,14 +258,14 @@ export const PrintMealModal: React.FC<PrintMealModalProps> = ({
                           r.mealType === 'canteen' ? 'bg-emerald-100 text-emerald-800' :
                           r.mealType === 'cash' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-500'
                         }`}>
-                          {r.mealType === 'canteen' ? 'Ăn tại bếp' : r.mealType === 'cash' ? 'Tiền mặt' : 'Không ăn'}
+                          {r.mealType === 'canteen' ? 'Ăn tại bếp' : r.mealType === 'cash' ? (r.cashMethod === 'by_attendance' ? 'Tiền mặt (Chấm công)' : 'Tiền mặt (Tự điền)') : 'Không ăn'}
                         </span>
                       </td>
                       <td className="border border-slate-400 p-1 text-right font-mono">
-                        {r.mealType === 'canteen' ? formatVND(r.rate) : '-'}
+                        {r.mealType === 'canteen' || (r.mealType === 'cash' && r.cashMethod === 'by_attendance') ? formatVND(r.rate) : '-'}
                       </td>
                       <td className="border border-slate-400 p-1 font-bold">
-                        {r.mealType === 'canteen' ? `${r.actualMeals} bữa` : '-'}
+                        {r.mealType === 'canteen' || (r.mealType === 'cash' && r.cashMethod === 'by_attendance') ? `${r.actualMeals} bữa` : '-'}
                       </td>
                       <td className="border border-slate-400 p-1 text-right font-mono text-emerald-800">
                         {r.canteenCost > 0 ? formatVND(r.canteenCost) : '-'}

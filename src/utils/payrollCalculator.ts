@@ -1219,7 +1219,14 @@ export const calculateEmployeePayroll = (
   });
 
   if (mealPlan === 'cash' || (!mealReg && mealAllowanceFromSpecial)) {
-    const flatAmount = mealReg?.monthlyFlatAmount ?? mealReg?.monthlyAllowance ?? mealAllowanceFromSpecial?.amount ?? (settings?.monthlyMealFlatRate || 1200000);
+    let flatAmount = 0;
+    if (mealReg?.cashMethod === 'by_attendance') {
+      const mealRate = mealReg?.ratePerMeal ?? mealReg?.customRatePerMeal ?? settings?.standardMealPerDay ?? 35000;
+      const actualMeals = timekeeping?.totalMeals || 0;
+      flatAmount = actualMeals * mealRate;
+    } else {
+      flatAmount = mealReg?.monthlyFlatAmount ?? mealReg?.monthlyAllowance ?? mealAllowanceFromSpecial?.amount ?? (settings?.monthlyMealFlatRate || 1200000);
+    }
     mealAllowance = flatAmount;
     
     if (otRules.mealExemptMode === 'fully_exempt') {
