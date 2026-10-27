@@ -115,6 +115,9 @@ export interface SystemSettings {
 
   // Mẫu văn bản in ấn (Hợp đồng lao động, Bản cam kết thu nhập)
   documentTemplates?: DocumentTemplatesConfig;
+
+  // Cho phép tự động lưu toàn bộ cấu hình khi có thay đổi
+  autoSaveSettings?: boolean;
 }
 
 export interface DocumentTemplatesConfig {

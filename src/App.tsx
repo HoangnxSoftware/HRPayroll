@@ -896,6 +896,7 @@ function PayrollAppContent() {
             <SettingsView
               settings={settings}
               onUpdateSettings={setSettings}
+              syncState={syncState}
             />
           )}
         </main>

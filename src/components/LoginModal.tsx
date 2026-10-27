@@ -39,7 +39,10 @@ import {
   createNewCompanySpreadsheet,
   ensureSpreadsheetInHRSalaryFolder,
   GOOGLE_DRIVE_FOLDER_NAME,
-  FullPayrollData
+  FullPayrollData,
+  fetchSpreadsheetLegalInfo,
+  checkLegalInfoMismatch,
+  SpreadsheetLegalInfo
 } from '../services/googleSheetsService';
 
 interface LoginModalProps {
@@ -372,6 +375,32 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   // Check if currently targeting demo data (no spreadsheet linked/selected)
   const isTargetingDemo = !isPendingNewCompany && (!selectedFileId && !syncState.spreadsheetId || syncState.isDemoMode || localStorage.getItem('payroll_is_demo_mode') === 'true');
 
+  // Active connected database spreadsheet ID & Legal Info Mismatch Detection
+  const activeConnectedId = !syncState.isDemoMode ? (selectedFileId || syncState.spreadsheetId || savedDb?.id || null) : null;
+  const [sheetLegalInfo, setSheetLegalInfo] = useState<SpreadsheetLegalInfo | null>(null);
+  const [showMismatchConfirmModal, setShowMismatchConfirmModal] = useState(false);
+  const [pendingLoginCredentials, setPendingLoginCredentials] = useState<{ username: string; password?: string } | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (activeConnectedId && syncState.isConnected && isOpen) {
+      fetchSpreadsheetLegalInfo(activeConnectedId)
+        .then(info => {
+          if (isMounted) setSheetLegalInfo(info);
+        })
+        .catch(err => {
+          console.warn('Lỗi đọc thông tin pháp nhân Google Sheets:', err);
+        });
+    } else {
+      setSheetLegalInfo(null);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [activeConnectedId, syncState.isConnected, isOpen]);
+
+  const legalMismatch = checkLegalInfoMismatch(settings, sheetLegalInfo);
+
   // Actual login execution
   const executeLogin = async (uname: string, pwd?: string, forceDemo?: boolean) => {
     const isDemo = forceDemo ?? (
@@ -517,6 +546,34 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
+    // Nếu kết nối Google Sheets và sai thông tin pháp nhân (Đơn vị / MST):
+    if (!isTargetingDemo && activeConnectedId && legalMismatch.isMismatch) {
+      const cleanUsername = username.trim().toLowerCase();
+      const foundUser = users.find(u => 
+        u.username.toLowerCase() === cleanUsername || 
+        u.email.toLowerCase() === cleanUsername
+      );
+
+      if (!foundUser) {
+        setErrorMessage('Tên đăng nhập hoặc Email không tồn tại trong hệ thống!');
+        return;
+      }
+
+      if (foundUser.status === 'locked') {
+        setErrorMessage('Tài khoản này đã bị tạm khóa. Vui lòng liên hệ Quản trị viên!');
+        return;
+      }
+
+      if (foundUser.password && password !== undefined && foundUser.password !== password) {
+        setErrorMessage('Mật khẩu không chính xác. Vui lòng thử lại!');
+        return;
+      }
+
+      setPendingLoginCredentials({ username, password });
+      setShowMismatchConfirmModal(true);
+      return;
+    }
+
     await executeLogin(username, password);
   };
 
@@ -532,7 +589,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
+    if (!isTargetingDemo && activeConnectedId && legalMismatch.isMismatch) {
+      setPendingLoginCredentials({ username: uname, password: pwd || '123' });
+      setShowMismatchConfirmModal(true);
+      return;
+    }
+
     await executeLogin(uname, pwd || '123');
+  };
+
+  const handleConfirmMismatchAndLogin = async () => {
+    setShowMismatchConfirmModal(false);
+    if (pendingLoginCredentials) {
+      await executeLogin(pendingLoginCredentials.username, pendingLoginCredentials.password);
+      setPendingLoginCredentials(null);
+    }
   };
 
   // Switch to local demo data from Google tab
@@ -627,10 +698,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               {isPendingNewCompany ? isPendingNewCompany.settings.companyName : settings.companyName}
             </span>
             {selectedFileName || syncState.spreadsheetName ? (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-semibold text-emerald-700">
-                <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
-                <span className="max-w-[160px] truncate">{selectedFileName || syncState.spreadsheetName}</span>
-              </span>
+              legalMismatch.isMismatch ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-100 border border-red-300 text-[11px] font-bold text-red-700 animate-pulse">
+                  <AlertOctagon className="w-3 h-3 text-red-600" />
+                  <span className="max-w-[160px] truncate">{selectedFileName || syncState.spreadsheetName} (Sai thông tin đơn vị)</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-semibold text-emerald-700">
+                  <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                  <span className="max-w-[160px] truncate">{selectedFileName || syncState.spreadsheetName}</span>
+                </span>
+              )
             ) : (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-50 border border-red-200 text-[11px] font-bold text-red-700">
                 <AlertTriangle className="w-3 h-3 text-red-600" />
@@ -671,10 +749,49 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <Cloud className="w-3.5 h-3.5 text-blue-600" />
             <span>Cơ Sở Dữ Liệu Google Drive / Sheet</span>
             {(selectedFileName || syncState.spreadsheetId) && (
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className={`w-2 h-2 rounded-full ${legalMismatch.isMismatch ? 'bg-red-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`}></span>
             )}
           </button>
         </div>
+
+        {/* RED WARNING: Dữ liệu kết nối sai thông tin đơn vị */}
+        {legalMismatch.isMismatch && !isTargetingDemo && (selectedFileName || syncState.spreadsheetId) && (
+          <div className="mb-4 p-3.5 bg-red-50 border-2 border-red-500 rounded-2xl text-xs text-red-900 shadow-sm animate-in fade-in">
+            <div className="flex items-start gap-2.5">
+              <div className="p-2 bg-red-600 text-white rounded-xl shrink-0 mt-0.5 shadow-xs">
+                <AlertOctagon className="w-5 h-5 animate-pulse" />
+              </div>
+              <div className="space-y-1.5 flex-1 min-w-0">
+                <div className="font-black text-xs sm:text-sm text-red-700 uppercase tracking-tight flex items-center justify-between gap-1 flex-wrap">
+                  <span>Dữ liệu kết nối sai thông tin đơn vị!</span>
+                  <span className="px-2 py-0.5 bg-red-200 text-red-900 rounded font-bold text-[10px]">Cảnh báo nghiêm trọng</span>
+                </div>
+                <p className="text-red-800 text-[11px] leading-relaxed">
+                  File Google Sheets đang kết nối <strong>("{selectedFileName || syncState.spreadsheetName}")</strong> có thông tin pháp nhân (Tên đơn vị hoặc Mã số thuế) <strong>KHÔNG KHỚP</strong> với Cài đặt hệ thống phần mềm:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1.5 bg-white/90 p-2.5 rounded-xl border border-red-200 font-mono text-[11px]">
+                  <div className="border-b sm:border-b-0 sm:border-r border-red-100 pb-1.5 sm:pb-0 sm:pr-2">
+                    <div className="text-[10px] uppercase font-bold text-slate-500 font-sans">1. Cài đặt hệ thống phần mềm:</div>
+                    <div className="font-bold text-slate-900 truncate" title={settings.companyName}>🏢 {settings.companyName}</div>
+                    <div className="font-semibold text-slate-700">📌 MST: {settings.taxCode || '(Chưa có)'}</div>
+                  </div>
+                  <div className="sm:pl-1 pt-1 sm:pt-0">
+                    <div className="text-[10px] uppercase font-bold text-red-600 font-sans">2. Trên file Google Sheets:</div>
+                    <div className={`font-bold truncate ${legalMismatch.nameMismatch ? 'text-red-700 font-black underline' : 'text-slate-900'}`} title={sheetLegalInfo?.companyName}>
+                      🏢 {sheetLegalInfo?.companyName || '(Không xác định)'}
+                    </div>
+                    <div className={`font-semibold ${legalMismatch.taxMismatch ? 'text-red-700 font-black underline' : 'text-slate-700'}`}>
+                      📌 MST: {sheetLegalInfo?.taxCode || '(Không xác định)'}
+                    </div>
+                  </div>
+                </div>
+                <p className="text-[10.5px] text-red-700 italic mt-1 font-medium">
+                  ⚠️ Hãy kiểm tra lại file bảng tính hoặc chọn đúng file cơ sở dữ liệu tại tab "Cơ Sở Dữ Liệu" trước khi đăng nhập để tránh cập nhật sai dữ liệu.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Alerts */}
         {errorMessage && (
@@ -1459,6 +1576,96 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   Đóng cảnh báo và quay lại form đăng nhập
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RED WARNING CONFIRMATION MODAL FOR LEGAL INFO MISMATCH (Sai thông tin đơn vị/MST) */}
+      {showMismatchConfirmModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/85 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border-2 border-red-500 overflow-hidden relative animate-in zoom-in-95 duration-200 flex flex-col my-auto max-h-[92vh]">
+            {/* Top Warning Strip */}
+            <div className="h-2.5 bg-gradient-to-r from-red-600 via-rose-600 to-amber-600" />
+
+            {/* Red Header */}
+            <div className="bg-gradient-to-r from-red-700 via-rose-800 to-red-900 p-5 sm:p-6 text-white relative">
+              <button
+                type="button"
+                onClick={() => setShowMismatchConfirmModal(false)}
+                className="absolute top-4 right-4 p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                title="Đóng cảnh báo"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-white shrink-0 border border-white/20">
+                  <AlertOctagon className="w-6 h-6 text-amber-300 animate-pulse" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-bold tracking-widest text-red-200 uppercase">
+                    Cảnh Báo Thông Tin Pháp Nhân
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black tracking-tight leading-snug">
+                    Sai thông tin đơn vị / MST!
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 space-y-4 overflow-y-auto text-xs">
+              <p className="text-slate-700 leading-relaxed">
+                File Google Sheets đang kết nối <strong>("{selectedFileName || syncState.spreadsheetName}")</strong> có thông tin pháp nhân (Tên đơn vị hoặc Mã số thuế) khác với cài đặt phần mềm hiện tại:
+              </p>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5 font-mono text-[11px]">
+                <div className="border-b border-slate-200 pb-2">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block font-sans">
+                    1. Cài đặt hệ thống phần mềm:
+                  </span>
+                  <div className="font-bold text-slate-900 mt-0.5">🏢 {settings.companyName}</div>
+                  <div className="text-slate-700">📌 MST: {settings.taxCode || '(Chưa có)'}</div>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-red-600 uppercase block font-sans">
+                    2. Trên file Google Sheets:
+                  </span>
+                  <div className={`font-bold mt-0.5 ${legalMismatch.nameMismatch ? 'text-red-700 font-black underline' : 'text-slate-900'}`}>
+                    🏢 {sheetLegalInfo?.companyName || '(Không xác định)'}
+                  </div>
+                  <div className={`${legalMismatch.taxMismatch ? 'text-red-700 font-black underline' : 'text-slate-700'}`}>
+                    📌 MST: {sheetLegalInfo?.taxCode || '(Không xác định)'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-red-50 border border-red-200 rounded-2xl text-red-900 font-black text-xs text-center shadow-xs">
+                ⚠️ Sai thông tin đơn vị/MST, có tiếp tục đồng bộ (cập nhật thông tin) hay không?
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMismatchConfirmModal(false);
+                  setActiveTab('google');
+                }}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 transition-colors cursor-pointer text-center"
+              >
+                Hủy bỏ (Kiểm tra lại)
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMismatchAndLogin}
+                className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-xs shadow-md shadow-red-600/30 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Tiếp tục đồng bộ (Cập nhật thông tin)</span>
+              </button>
             </div>
           </div>
         </div>

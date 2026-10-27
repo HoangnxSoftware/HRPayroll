@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   Building, 
   UserCheck, 
@@ -26,23 +26,28 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  FileSpreadsheet
+  FileSpreadsheet,
+  AlertOctagon,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { SystemSettings, Department, Position, Holiday, SalaryCalculationBasis, FixedDaysOffPolicy, TaxBracket, TaxExemptionRules, InsuranceRatePeriod } from '../types';
+import { SystemSettings, GoogleSyncState, Department, Position, Holiday, SalaryCalculationBasis, FixedDaysOffPolicy, TaxBracket, TaxExemptionRules, InsuranceRatePeriod } from '../types';
 import { formatVND, calculateStandardDaysFromPolicy, DEFAULT_TAX_BRACKETS, DEFAULT_TAX_EXEMPTION_RULES, getAvailableYears } from '../utils/payrollCalculator';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { EditTaxBracketsModal } from '../components/EditTaxBracketsModal';
 import { EditTaxExemptionModal } from '../components/EditTaxExemptionModal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { fetchSpreadsheetLegalInfo, checkLegalInfoMismatch, SpreadsheetLegalInfo } from '../services/googleSheetsService';
 
 
 interface SettingsViewProps {
   settings: SystemSettings;
   onUpdateSettings: (newSettings: SystemSettings) => void;
+  syncState?: GoogleSyncState;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, syncState }) => {
   const { canEditSettings } = useAuthRole();
   const [formData, setFormData] = useState<SystemSettings>(settings);
 
@@ -54,6 +59,56 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<'general' | 'departments' | 'positions' | 'holidays' | 'payroll_rules'>('general');
   const [standardConfigYear, setStandardConfigYear] = useState<number>(settings.currentYear || 2026);
+
+  // Thông tin pháp nhân Google Sheets & Kiểm tra sai lệch
+  const [sheetLegalInfo, setSheetLegalInfo] = useState<SpreadsheetLegalInfo | null>(null);
+  const [isLoadingSheetLegal, setIsLoadingSheetLegal] = useState(false);
+  const [showLegalMismatchSaveModal, setShowLegalMismatchSaveModal] = useState(false);
+
+  // Chức năng cho phép tự động lưu toàn bộ cấu hình khi có thay đổi
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(() => {
+    if (typeof settings.autoSaveSettings === 'boolean') return settings.autoSaveSettings;
+    const saved = localStorage.getItem('payroll_auto_save_settings');
+    return saved === 'true';
+  });
+  const [lastAutoSaveTime, setLastAutoSaveTime] = useState<string | null>(null);
+  const [autoSaveBlockedDueToMismatch, setAutoSaveBlockedDueToMismatch] = useState(false);
+
+  // Bảng tính Google Sheets đang kết nối
+  const targetSpreadsheetId = syncState?.spreadsheetId || (() => {
+    try {
+      const saved = localStorage.getItem('payroll_saved_database_info');
+      if (saved) return JSON.parse(saved).id;
+    } catch (_) {}
+    return null;
+  })();
+  const isConnectedToSheet = Boolean(syncState?.isConnected && targetSpreadsheetId && !syncState?.isDemoMode);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (isConnectedToSheet && targetSpreadsheetId) {
+      setIsLoadingSheetLegal(true);
+      fetchSpreadsheetLegalInfo(targetSpreadsheetId)
+        .then(info => {
+          if (isMounted) setSheetLegalInfo(info);
+        })
+        .catch(err => {
+          console.warn('Lỗi đọc thông tin pháp nhân Google Sheets trong Cài đặt:', err);
+        })
+        .finally(() => {
+          if (isMounted) setIsLoadingSheetLegal(false);
+        });
+    } else {
+      setSheetLegalInfo(null);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [isConnectedToSheet, targetSpreadsheetId]);
+
+  // Kiểm tra thông tin pháp nhân đơn vị (Tên đơn vị/Doanh nghiệp và mã số thuế) so với Google Sheets
+  const legalMismatch = checkLegalInfoMismatch(formData, sheetLegalInfo);
+
 
   // Modals / new items
   const [newDep, setNewDep] = useState({ code: '', name: '', managerName: '', description: '' });
@@ -94,19 +149,91 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
     note: ''
   });
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Hàm lưu cấu hình hệ thống
+  const executeSave = (dataToSave: SystemSettings, isAuto = false) => {
     try {
-      if (formData.address && formData.address.trim()) {
-        localStorage.setItem('payroll_company_address', formData.address.trim());
+      if (dataToSave.address && dataToSave.address.trim()) {
+        localStorage.setItem('payroll_company_address', dataToSave.address.trim());
       }
-      if (formData.phoneNumber && formData.phoneNumber.trim() && formData.phoneNumber !== 'capped' && formData.phoneNumber !== 'fully_exempt') {
-        localStorage.setItem('payroll_company_phone', formData.phoneNumber.trim());
+      if (dataToSave.phoneNumber && dataToSave.phoneNumber.trim() && dataToSave.phoneNumber !== 'capped' && dataToSave.phoneNumber !== 'fully_exempt') {
+        localStorage.setItem('payroll_company_phone', dataToSave.phoneNumber.trim());
       }
     } catch (_) {}
-    onUpdateSettings(formData);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+    onUpdateSettings(dataToSave);
+    if (!isAuto) {
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3500);
+    } else {
+      const timeStr = new Date().toLocaleTimeString('vi-VN');
+      setLastAutoSaveTime(timeStr);
+    }
+    setAutoSaveBlockedDueToMismatch(false);
+  };
+
+  // Bật/tắt chế độ tự động lưu
+  const handleToggleAutoSave = (enable: boolean) => {
+    setAutoSaveEnabled(enable);
+    localStorage.setItem('payroll_auto_save_settings', String(enable));
+    const updated = { ...formData, autoSaveSettings: enable };
+    setFormData(updated);
+    onUpdateSettings(updated);
+  };
+
+  // Tự động lưu toàn bộ cấu hình khi có thay đổi (kèm chặn nếu sai thông tin đơn vị / MST)
+  const isInitialMount = useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    if (!autoSaveEnabled || !canEditSettings) return;
+
+    // Khi lưu cấu hình nếu thông tin pháp nhân đơn vị (Tên đơn vị và MST) sai so với Google Sheets đang kết nối:
+    // Cảnh báo đỏ sai thông tin trước khi lưu, cập nhật cấu hình -> Tạm dừng tự động lưu để cảnh báo
+    if (isConnectedToSheet && legalMismatch.isMismatch) {
+      setAutoSaveBlockedDueToMismatch(true);
+      return;
+    }
+
+    setAutoSaveBlockedDueToMismatch(false);
+    const timer = setTimeout(() => {
+      executeSave(formData, true);
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [formData, autoSaveEnabled, isConnectedToSheet, legalMismatch.isMismatch]);
+
+  // Xử lý khi nhấn nút Lưu Toàn Bộ Cấu Hình
+  const handleSave = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+
+    // Nếu thông tin pháp nhân (Tên đơn vị hoặc MST) sai so với dữ liệu Google Sheets đang kết nối:
+    // CẢNH BÁO ĐỎ SAI THÔNG TIN TRƯỚC KHI LƯU, CẬP NHẬT CẤU HÌNH
+    if (isConnectedToSheet && legalMismatch.isMismatch) {
+      setShowLegalMismatchSaveModal(true);
+      return;
+    }
+
+    executeSave(formData, false);
+  };
+
+  // Tiếp tục lưu cấu hình dù có sai lệch pháp nhân (người dùng đã xác nhận)
+  const handleConfirmSaveWithMismatch = () => {
+    setShowLegalMismatchSaveModal(false);
+    executeSave(formData, false);
+  };
+
+  // Khắc phục nhanh: Cập nhật Tên đơn vị và MST từ Google Sheets vào cấu hình rồi lưu
+  const handleSyncLegalInfoFromSheet = () => {
+    if (!sheetLegalInfo) return;
+    const updated: SystemSettings = {
+      ...formData,
+      companyName: sheetLegalInfo.companyName || formData.companyName,
+      taxCode: sheetLegalInfo.taxCode || formData.taxCode
+    };
+    setFormData(updated);
+    executeSave(updated, false);
+    setShowLegalMismatchSaveModal(false);
   };
 
   const handleAddDepartment = () => {
@@ -672,22 +799,96 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   return (
     <div className="space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div>
-          <h2 className="text-xl font-black text-slate-900 tracking-tight">Cài Đặt Hệ Thống & Quy Định Tính Lương</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h2 className="text-xl font-black text-slate-900 tracking-tight">Cài Đặt Hệ Thống & Quy Định Tính Lương</h2>
+            {isConnectedToSheet && (
+              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                legalMismatch.isMismatch 
+                  ? 'bg-red-100 text-red-700 border border-red-300 animate-pulse'
+                  : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+              }`}>
+                {legalMismatch.isMismatch ? (
+                  <>
+                    <AlertOctagon className="w-3.5 h-3.5 text-red-600" />
+                    <span>Sheets: Lệch thông tin đơn vị</span>
+                  </>
+                ) : (
+                  <>
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Sheets: Đã đồng bộ pháp nhân</span>
+                  </>
+                )}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
             Quản lý thông tin doanh nghiệp, đại diện ký biểu, phòng ban, chức vụ, ngày nghỉ lễ và chính sách tiền lương
           </p>
         </div>
 
         {canEditSettings && (
-          <button
-            onClick={handleSave}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold shadow-xs transition-colors cursor-pointer"
-          >
-            <Save className="w-4 h-4" />
-            <span>Lưu Toàn Bộ Cấu Hình</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Chức năng cho phép tự động lưu toàn bộ cấu hình khi có thay đổi */}
+            <div className="flex items-center gap-3 px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl shadow-2xs">
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Tự động lưu khi thay đổi</span>
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  {autoSaveBlockedDueToMismatch ? (
+                    <span className="text-red-600 font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 text-red-500" />
+                      Tạm dừng (Lệch Tên/MST)
+                    </span>
+                  ) : autoSaveEnabled ? (
+                    lastAutoSaveTime ? (
+                      <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                        <Check className="w-3 h-3 text-emerald-600" />
+                        Đã lưu lúc {lastAutoSaveTime}
+                      </span>
+                    ) : (
+                      <span className="text-emerald-700 font-medium">Đang bật tự động lưu</span>
+                    )
+                  ) : (
+                    'Chế độ lưu thủ công'
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoSaveEnabled}
+                onClick={() => handleToggleAutoSave(!autoSaveEnabled)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                  autoSaveEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                }`}
+                title={autoSaveEnabled ? 'Nhấn để tắt tự động lưu' : 'Nhấn để bật tự động lưu toàn bộ cấu hình'}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                    autoSaveEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Nút Lưu Toàn Bộ Cấu Hình thủ công */}
+            <button
+              type="button"
+              onClick={handleSave}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-xs transition-all cursor-pointer ${
+                legalMismatch.isMismatch && isConnectedToSheet
+                  ? 'bg-red-600 hover:bg-red-700 text-white ring-2 ring-red-300'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+              }`}
+            >
+              <Save className="w-4 h-4" />
+              <span>{legalMismatch.isMismatch && isConnectedToSheet ? 'Lưu Cấu Hình (Cảnh Báo Lệch)' : 'Lưu Toàn Bộ Cấu Hình'}</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -695,6 +896,67 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
         <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-200">
           <CheckCircle2 className="w-4 h-4 text-emerald-600" />
           <span>Cấu hình hệ thống và chính sách tiền lương đã được lưu trữ thành công!</span>
+        </div>
+      )}
+
+      {/* CẢNH BÁO ĐỎ: DỮ LIỆU CẤU HÌNH SAI THÔNG TIN ĐƠN VỊ / MÃ SỐ THUẾ SO VỚI GOOGLE SHEETS */}
+      {isConnectedToSheet && legalMismatch.isMismatch && (
+        <div className="p-4 bg-red-50 border-2 border-red-500 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs text-red-900 shadow-sm animate-in fade-in">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 bg-red-600 text-white rounded-xl shrink-0 mt-0.5 shadow-xs">
+              <AlertOctagon className="w-6 h-6 animate-pulse" />
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-black text-sm text-red-900 uppercase tracking-tight flex items-center gap-2">
+                <span>CẢNH BÁO ĐỎ: DỮ LIỆU CẤU HÌNH SAI THÔNG TIN ĐƠN VỊ / MÃ SỐ THUẾ SO VỚI GOOGLE SHEETS!</span>
+              </div>
+              <p className="text-red-800 leading-relaxed">
+                Thông tin pháp nhân đang cấu hình trên phần mềm không trùng khớp với bảng tính Google Sheets đang kết nối: <strong>{sheetLegalInfo?.title || 'Bảng tính Google Sheets'}</strong>.
+                Hệ thống yêu cầu kiểm tra và cảnh báo trước khi lưu hoặc cập nhật cấu hình.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-white/95 p-2.5 rounded-xl border border-red-200 mt-1 font-mono text-[11px]">
+                <div className="space-y-0.5">
+                  <div className="text-[10px] font-sans font-bold text-slate-500 uppercase tracking-wider">Cấu hình phần mềm hiện tại:</div>
+                  <div className={`font-bold ${legalMismatch.nameMismatch ? 'text-red-700' : 'text-slate-800'}`}>
+                    {formData.companyName || '(Chưa có tên đơn vị)'}
+                  </div>
+                  <div className={`${legalMismatch.taxMismatch ? 'text-red-700 font-bold' : 'text-slate-600'}`}>
+                    MST: {formData.taxCode || '(Chưa có MST)'}
+                  </div>
+                </div>
+                <div className="space-y-0.5 border-t sm:border-t-0 sm:border-l border-red-100 sm:pl-3 pt-1.5 sm:pt-0">
+                  <div className="text-[10px] font-sans font-bold text-red-600 uppercase tracking-wider">Trên Google Sheets đang kết nối:</div>
+                  <div className="font-bold text-red-900">
+                    {sheetLegalInfo?.companyName || '(Không tìm thấy tên đơn vị)'}
+                  </div>
+                  <div className="text-red-800 font-bold">
+                    MST: {sheetLegalInfo?.taxCode || '(Không tìm thấy MST)'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0 self-stretch md:self-center">
+            {sheetLegalInfo && (
+              <button
+                type="button"
+                onClick={handleSyncLegalInfoFromSheet}
+                className="px-3.5 py-2 bg-white border border-red-300 hover:bg-red-100 text-red-800 font-bold rounded-xl shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                title="Lấy Tên đơn vị và MST từ Google Sheets cập nhật vào cấu hình rồi lưu"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-red-600" />
+                <span>Sửa nhanh theo Sheets</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowLegalMismatchSaveModal(true)}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+            >
+              <span>Xem & Lưu Cấu Hình</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -758,10 +1020,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                   disabled={!canEditSettings}
                   value={formData.companyName}
                   onChange={e => setFormData({ ...formData, companyName: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  className={`w-full px-3 py-2 border rounded-lg font-bold focus:ring-2 focus:outline-none ${
+                    isConnectedToSheet && legalMismatch.nameMismatch
+                      ? 'border-red-400 bg-red-50/40 text-red-950 focus:ring-red-400'
+                      : 'border-slate-300 text-slate-900 focus:ring-emerald-500'
+                  }`}
                 />
+                {isConnectedToSheet && legalMismatch.nameMismatch && (
+                  <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-red-600">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                    <span>Khác trên Google Sheets: <strong>{sheetLegalInfo?.companyName || '(Trống)'}</strong></span>
+                  </div>
+                )}
               </div>
-
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Mã Số Thuế (MST) *</label>
                 <input
@@ -769,10 +1040,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                   disabled={!canEditSettings}
                   value={formData.taxCode}
                   onChange={e => setFormData({ ...formData, taxCode: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  className={`w-full px-3 py-2 border rounded-lg font-mono font-bold focus:ring-2 focus:outline-none ${
+                    isConnectedToSheet && legalMismatch.taxMismatch
+                      ? 'border-red-400 bg-red-50/40 text-red-950 focus:ring-red-400'
+                      : 'border-slate-300 text-slate-900 focus:ring-emerald-500'
+                  }`}
                 />
+                {isConnectedToSheet && legalMismatch.taxMismatch && (
+                  <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-red-600">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                    <span>Khác trên Google Sheets: <strong>{sheetLegalInfo?.taxCode || '(Trống)'}</strong></span>
+                  </div>
+                )}
               </div>
-
               <div className="md:col-span-2">
                 <label className="block font-semibold text-slate-700 mb-1">Địa Chỉ Trụ Sở</label>
                 <input
@@ -2847,6 +3127,88 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CẢNH BÁO ĐỎ: SAI THÔNG TIN PHÁP NHÂN TRƯỚC KHI LƯU CẤU HÌNH */}
+      {showLegalMismatchSaveModal && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center bg-black/60 p-4 backdrop-blur-2xs">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 border-2 border-red-500 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-3">
+              <div className="p-3 bg-red-100 text-red-600 rounded-xl shrink-0">
+                <AlertOctagon className="w-8 h-8 animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-black text-slate-900 text-base leading-snug">
+                  CẢNH BÁO: SAI THÔNG TIN ĐƠN VỊ / MÃ SỐ THUẾ!
+                </h3>
+                <p className="text-xs font-semibold text-red-600">
+                  Thông tin pháp nhân khác với file Google Sheets đang kết nối
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-red-50/80 rounded-xl border border-red-200 text-xs text-red-900 space-y-3">
+              <p className="leading-relaxed">
+                Thông tin pháp nhân bạn đang chuẩn bị lưu khác với thông tin ghi nhận trên file Google Sheets đang kết nối (<strong>{sheetLegalInfo?.title || 'Google Spreadsheet'}</strong>):
+              </p>
+
+              <div className="grid grid-cols-2 gap-3 p-3 bg-white rounded-xl border border-red-100 shadow-2xs">
+                <div className="space-y-1">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Cấu hình chuẩn bị lưu:</div>
+                  <div className={`font-bold truncate ${legalMismatch.nameMismatch ? 'text-red-700' : 'text-slate-800'}`}>
+                    {formData.companyName || '(Trống)'}
+                  </div>
+                  <div className={`font-mono text-[11px] ${legalMismatch.taxMismatch ? 'text-red-700 font-bold' : 'text-slate-600'}`}>
+                    MST: {formData.taxCode || '(Trống)'}
+                  </div>
+                </div>
+
+                <div className="space-y-1 border-l border-red-100 pl-3">
+                  <div className="text-[10px] font-bold text-red-600 uppercase tracking-wider">File Google Sheets:</div>
+                  <div className="font-bold text-red-900 truncate">
+                    {sheetLegalInfo?.companyName || '(Không tìm thấy)'}
+                  </div>
+                  <div className="font-mono text-red-800 text-[11px] font-bold">
+                    MST: {sheetLegalInfo?.taxCode || '(Không tìm thấy)'}
+                  </div>
+                </div>
+              </div>
+
+              {sheetLegalInfo && (
+                <button
+                  type="button"
+                  onClick={handleSyncLegalInfoFromSheet}
+                  className="w-full py-2 px-3 bg-white border border-red-300 hover:bg-red-100 text-red-800 font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-red-600" />
+                  <span>Cập nhật nhanh thông tin theo Google Sheets rồi lưu</span>
+                </button>
+              )}
+
+              <p className="text-xs font-bold text-red-700 pt-1 text-center">
+                Sai thông tin đơn vị / MST. Bạn có tiếp tục lưu (cập nhật thông tin cấu hình) hay không?
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowLegalMismatchSaveModal(false)}
+                className="px-4 py-2.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                Hủy bỏ (Kiểm tra lại)
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSaveWithMismatch}
+                className="px-4 py-2.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Tiếp tục lưu (Cập nhật cấu hình)</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

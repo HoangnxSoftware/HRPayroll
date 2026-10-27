@@ -2248,3 +2248,137 @@ export const importDataFromGoogleSheets = async (
 ): Promise<Partial<FullPayrollData>> => {
   return importFullDataFromGoogleSheets(spreadsheetId);
 };
+
+export interface SpreadsheetLegalInfo {
+  id: string;
+  title: string;
+  companyName: string;
+  taxCode: string;
+}
+
+export interface LegalInfoMismatch {
+  isMismatch: boolean;
+  systemName: string;
+  systemTaxCode: string;
+  sheetName: string;
+  sheetTaxCode: string;
+  nameMismatch: boolean;
+  taxMismatch: boolean;
+}
+
+/**
+ * Kiểm tra sự sai lệch giữa thông tin pháp nhân cài đặt hệ thống và trên Google Sheets
+ */
+export const checkLegalInfoMismatch = (
+  systemSettings: { companyName?: string; taxCode?: string },
+  sheetInfo: { companyName?: string; taxCode?: string } | null | undefined
+): LegalInfoMismatch => {
+  if (!sheetInfo) {
+    return {
+      isMismatch: false,
+      systemName: systemSettings.companyName || '',
+      systemTaxCode: systemSettings.taxCode || '',
+      sheetName: '',
+      sheetTaxCode: '',
+      nameMismatch: false,
+      taxMismatch: false
+    };
+  }
+
+  const clean = (s: string | undefined | null) => 
+    (s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+  const sysNameClean = clean(systemSettings.companyName);
+  const sheetNameClean = clean(sheetInfo.companyName);
+  const sysTaxClean = clean(systemSettings.taxCode);
+  const sheetTaxClean = clean(sheetInfo.taxCode);
+
+  const hasSheetName = !!sheetNameClean;
+  const hasSheetTax = !!sheetTaxClean;
+
+  const nameMismatch = hasSheetName && sysNameClean !== '' && sysNameClean !== sheetNameClean;
+  const taxMismatch = hasSheetTax && sysTaxClean !== '' && sysTaxClean !== sheetTaxClean;
+
+  return {
+    isMismatch: nameMismatch || taxMismatch,
+    systemName: systemSettings.companyName || '',
+    systemTaxCode: systemSettings.taxCode || '',
+    sheetName: sheetInfo.companyName || '',
+    sheetTaxCode: sheetInfo.taxCode || '',
+    nameMismatch,
+    taxMismatch
+  };
+};
+
+/**
+ * Đọc nhanh thông tin pháp nhân (Tên đơn vị, MST) từ file Google Sheets đang kết nối
+ */
+export const fetchSpreadsheetLegalInfo = async (
+  spreadsheetId: string
+): Promise<SpreadsheetLegalInfo | null> => {
+  const token = await getAccessToken();
+  if (!token) return null;
+
+  const cleanId = extractSpreadsheetId(spreadsheetId);
+  if (!cleanId) return null;
+
+  try {
+    const metaRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}?fields=spreadsheetId,properties.title,sheets.properties.title`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!metaRes.ok) return null;
+    const metaData = await metaRes.json();
+    const title = metaData.properties?.title || 'Bảng tính Google Sheets';
+    
+    const sheetTitles: string[] = (metaData.sheets || []).map((s: any) => s.properties?.title || '');
+    let targetTab: string | undefined = sheetTitles.find((t: string) => t === 'HeThong_CaiDat' || t === 'CaiDat_HeThong');
+    if (!targetTab) {
+      targetTab = sheetTitles.find((t: string) => t.toLowerCase().includes('caidat') || t.toLowerCase().includes('hethong'));
+    }
+
+    if (!targetTab) {
+      return { id: cleanId, title, companyName: '', taxCode: '' };
+    }
+
+    const valRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(targetTab)}!A1:D30`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!valRes.ok) {
+      return { id: cleanId, title, companyName: '', taxCode: '' };
+    }
+    const valData = await valRes.json();
+    const rows: string[][] = valData.values || [];
+
+    let companyName = '';
+    let taxCode = '';
+
+    for (const row of rows) {
+      if (!row || row.length < 2) continue;
+      const col0 = String(row[0] || '').trim().toLowerCase();
+      const col1 = String(row[1] || '').trim().toLowerCase();
+      const val = row[2] !== undefined ? String(row[2]).trim() : String(row[1] || '').trim();
+
+      const isNameKey = col1.includes('tên đơn vị') || col1.includes('tên công ty') || col1.includes('doanh nghiệp') || col0.includes('tên đơn vị') || col0.includes('tên công ty');
+      const isTaxKey = col1.includes('mã số thuế') || col1.includes('mst') || col1.includes('tax code') || col0.includes('mã số thuế') || col0.includes('mst');
+
+      if (isNameKey && val && !companyName) {
+        companyName = val;
+      }
+      if (isTaxKey && val && !taxCode) {
+        taxCode = val;
+      }
+    }
+
+    return { id: cleanId, title, companyName, taxCode };
+  } catch (e) {
+    console.warn('Lỗi đọc thông tin pháp nhân từ Google Sheet:', e);
+    return null;
+  }
+};
+

@@ -14,7 +14,8 @@ import {
   FolderOpen,
   Folder,
   Lock,
-  AlertTriangle
+  AlertTriangle,
+  AlertOctagon
 } from 'lucide-react';
 import { GoogleSyncState, SystemSettings } from '../types';
 import { googleSignIn, logout, getCurrentUser } from '../services/authService';
@@ -25,7 +26,10 @@ import {
   DriveFolderInfo,
   exportDataToGoogleSheets, 
   importDataFromGoogleSheets,
-  FullPayrollData
+  FullPayrollData,
+  fetchSpreadsheetLegalInfo,
+  checkLegalInfoMismatch,
+  SpreadsheetLegalInfo
 } from '../services/googleSheetsService';
 
 interface GoogleSyncModalProps {
@@ -54,6 +58,33 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
     message: string;
     action: () => Promise<void>;
   } | null>(null);
+
+  // Thông tin pháp nhân trên Google Sheets & Cảnh báo sai thông tin đơn vị/MST
+  const [sheetLegalInfo, setSheetLegalInfo] = useState<SpreadsheetLegalInfo | null>(null);
+  const [showMismatchConfirmModal, setShowMismatchConfirmModal] = useState<{
+    show: boolean;
+    action: () => Promise<void>;
+  } | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (syncState.isConnected && syncState.spreadsheetId && isOpen) {
+      fetchSpreadsheetLegalInfo(syncState.spreadsheetId)
+        .then(info => {
+          if (isMounted) setSheetLegalInfo(info);
+        })
+        .catch(err => {
+          console.warn('Không thể đọc thông tin pháp nhân Google Sheets:', err);
+        });
+    } else {
+      setSheetLegalInfo(null);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [syncState.isConnected, syncState.spreadsheetId, isOpen]);
+
+  const legalMismatch = checkLegalInfoMismatch(payrollData.settings, sheetLegalInfo);
 
   useEffect(() => {
     if (syncState.isConnected && isOpen) {
@@ -131,31 +162,43 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
       return;
     }
 
+    const performExport = async () => {
+      setIsProcessing(true);
+      setActionMessage('Đang đồng bộ 8 phân hệ dữ liệu lên Google Sheets...');
+      try {
+        const res = await exportDataToGoogleSheets(syncState.spreadsheetId!, payrollData);
+        const nowStr = new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN');
+        setSyncState(prev => ({
+          ...prev,
+          lastSyncTime: nowStr,
+          syncSuccess: true,
+          syncMessage: `Đã đồng bộ ${res.totalUpdatedCells} ô dữ liệu vào ${nowStr}`
+        }));
+        setActionMessage(`Đồng bộ lên Google Sheets thành công! (${res.totalUpdatedCells} ô dữ liệu đã được cập nhật)`);
+      } catch (err: any) {
+        console.error('Export error:', err);
+        setActionMessage(`Lỗi đồng bộ: ${err.message}`);
+      } finally {
+        setIsProcessing(false);
+        setConfirmDialog(null);
+        setShowMismatchConfirmModal(null);
+      }
+    };
+
+    // Nếu sai thông tin đơn vị/MST: Hiện thông báo xác nhận theo yêu cầu
+    if (legalMismatch.isMismatch) {
+      setShowMismatchConfirmModal({
+        show: true,
+        action: performExport
+      });
+      return;
+    }
+
     setConfirmDialog({
       show: true,
       title: 'Xác nhận cập nhật Google Sheets',
       message: `Bạn có chắc chắn muốn ghi đè toàn bộ dữ liệu bảng lương, nhân sự, chấm công, BHXH tháng ${payrollData.settings.currentMonth}/${payrollData.settings.currentYear} vào Google Spreadsheet trên Drive của bạn? Thao tác này sẽ cập nhật các tab trong bảng tính.`,
-      action: async () => {
-        setIsProcessing(true);
-        setActionMessage('Đang đồng bộ 8 phân hệ dữ liệu lên Google Sheets...');
-        try {
-          const res = await exportDataToGoogleSheets(syncState.spreadsheetId!, payrollData);
-          const nowStr = new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN');
-          setSyncState(prev => ({
-            ...prev,
-            lastSyncTime: nowStr,
-            syncSuccess: true,
-            syncMessage: `Đã đồng bộ ${res.totalUpdatedCells} ô dữ liệu vào ${nowStr}`
-          }));
-          setActionMessage(`Đồng bộ lên Google Sheets thành công! (${res.totalUpdatedCells} ô dữ liệu đã được cập nhật)`);
-        } catch (err: any) {
-          console.error('Export error:', err);
-          setActionMessage(`Lỗi đồng bộ: ${err.message}`);
-        } finally {
-          setIsProcessing(false);
-          setConfirmDialog(null);
-        }
-      }
+      action: performExport
     });
   };
 
@@ -165,32 +208,44 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
       return;
     }
 
+    const performImport = async () => {
+      setIsProcessing(true);
+      setActionMessage('Đang nạp dữ liệu từ Google Sheets...');
+      try {
+        const imported = await importDataFromGoogleSheets(syncState.spreadsheetId!);
+        onDataImported(imported);
+        const nowStr = new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN');
+        setSyncState(prev => ({
+          ...prev,
+          lastSyncTime: nowStr,
+          syncSuccess: true,
+          syncMessage: `Đã nạp dữ liệu từ Google Sheets lúc ${nowStr}`
+        }));
+        setActionMessage('Nạp dữ liệu từ Google Sheets thành công!');
+      } catch (err: any) {
+        console.error('Import error:', err);
+        setActionMessage(`Lỗi nạp dữ liệu: ${err.message}`);
+      } finally {
+        setIsProcessing(false);
+        setConfirmDialog(null);
+        setShowMismatchConfirmModal(null);
+      }
+    };
+
+    // Nếu sai thông tin đơn vị/MST: Hiện thông báo xác nhận theo yêu cầu
+    if (legalMismatch.isMismatch) {
+      setShowMismatchConfirmModal({
+        show: true,
+        action: performImport
+      });
+      return;
+    }
+
     setConfirmDialog({
       show: true,
       title: 'Xác nhận nạp dữ liệu từ Google Sheets',
       message: 'Bạn có chắc chắn muốn đọc lại dữ liệu nhân viên từ Google Spreadsheet về hệ thống? Dữ liệu hiện tại trên trình duyệt sẽ được cập nhật đồng bộ.',
-      action: async () => {
-        setIsProcessing(true);
-        setActionMessage('Đang nạp dữ liệu từ Google Sheets...');
-        try {
-          const imported = await importDataFromGoogleSheets(syncState.spreadsheetId!);
-          onDataImported(imported);
-          const nowStr = new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN');
-          setSyncState(prev => ({
-            ...prev,
-            lastSyncTime: nowStr,
-            syncSuccess: true,
-            syncMessage: `Đã nạp dữ liệu từ Google Sheets lúc ${nowStr}`
-          }));
-          setActionMessage('Nạp dữ liệu từ Google Sheets thành công!');
-        } catch (err: any) {
-          console.error('Import error:', err);
-          setActionMessage(`Lỗi nạp dữ liệu: ${err.message}`);
-        } finally {
-          setIsProcessing(false);
-          setConfirmDialog(null);
-        }
-      }
+      action: performImport
     });
   };
 
@@ -231,6 +286,31 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
                 <p className="text-red-700 leading-relaxed text-[11px]">
                   Bạn đang đăng nhập bằng <strong>Dữ liệu mẫu nội bộ (Offline/Demo)</strong>. Tính năng đồng bộ / đẩy dữ liệu lên Google Sheets đã bị khóa nhằm tránh ghi đè dữ liệu mẫu vào cơ sở dữ liệu đã kết nối trên Google Sheets của doanh nghiệp.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* Cảnh báo sai thông tin đơn vị / MST nếu có */}
+          {legalMismatch.isMismatch && !syncState.isDemoMode && syncState.spreadsheetId && (
+            <div className="p-4 bg-red-50 border-2 border-red-500 rounded-xl space-y-2.5 shadow-xs">
+              <div className="flex items-center gap-2 text-red-800 font-bold text-sm">
+                <AlertOctagon className="w-5 h-5 text-red-600 animate-pulse shrink-0" />
+                <span>CẢNH BÁO: DỮ LIỆU KẾT NỐI SAI THÔNG TIN ĐƠN VỊ / MÃ SỐ THUẾ!</span>
+              </div>
+              <p className="text-xs text-red-700 leading-relaxed">
+                Thông tin pháp nhân trong Cài đặt hệ thống của phần mềm <strong>không trùng khớp</strong> với thông tin lưu trên file Google Sheets đang kết nối. Vui lòng kiểm tra kỹ trước khi thực hiện đồng bộ!
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-white/80 p-3 rounded-lg border border-red-200">
+                <div className="space-y-1">
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Cài đặt phần mềm hiện tại:</div>
+                  <div className="font-semibold text-slate-900">{payrollData.settings.companyName || '(Chưa cấu hình)'}</div>
+                  <div className="font-mono text-slate-700 text-[11px]">MST: {payrollData.settings.taxCode || '(Chưa có)'}</div>
+                </div>
+                <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-red-100 sm:pl-3 pt-2 sm:pt-0">
+                  <div className="text-[11px] font-bold text-red-600 uppercase tracking-wider">File Google Sheets đang kết nối:</div>
+                  <div className="font-semibold text-red-900">{sheetLegalInfo?.companyName || '(Không tìm thấy tên đơn vị)'}</div>
+                  <div className="font-mono text-red-800 text-[11px]">MST: {sheetLegalInfo?.taxCode || '(Không tìm thấy MST)'}</div>
+                </div>
               </div>
             </div>
           )}
@@ -441,6 +521,72 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
               >
                 {isProcessing && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                 <span>Xác nhận thực hiện</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cảnh Báo Sai Thông Tin Đơn Vị/MST Khi Đồng Bộ */}
+      {showMismatchConfirmModal && showMismatchConfirmModal.show && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center bg-black/60 p-4 backdrop-blur-2xs">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 border-2 border-red-500 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-red-100 text-red-600 rounded-xl shrink-0">
+                <AlertOctagon className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-black text-slate-900 text-base">
+                  Sai thông tin đơn vị / MST!
+                </h3>
+                <p className="text-sm font-semibold text-red-600">
+                  Có tiếp tục đồng bộ (cập nhật thông tin) hay không?
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-red-50/80 rounded-xl border border-red-200 text-xs text-red-900 space-y-2">
+              <p className="leading-relaxed">
+                File Google Sheets đang kết nối có thông tin đơn vị / MST khác với Cài đặt hệ thống hiện tại của bạn:
+              </p>
+              <div className="grid grid-cols-2 gap-2 p-2 bg-white rounded-lg border border-red-100">
+                <div>
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">Cài đặt phần mềm:</div>
+                  <div className="font-bold text-slate-800 truncate">{payrollData.settings.companyName || '---'}</div>
+                  <div className="font-mono text-slate-600 text-[11px]">MST: {payrollData.settings.taxCode || '---'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-red-500 uppercase">Trên Google Sheets:</div>
+                  <div className="font-bold text-red-700 truncate">{sheetLegalInfo?.companyName || '---'}</div>
+                  <div className="font-mono text-red-600 text-[11px]">MST: {sheetLegalInfo?.taxCode || '---'}</div>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-600 italic">
+                Nếu bạn tiếp tục, dữ liệu sẽ được đồng bộ/ghi đè theo thao tác đã chọn.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowMismatchConfirmModal(null)}
+                disabled={isProcessing}
+                className="px-4 py-2.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const act = showMismatchConfirmModal.action;
+                  setShowMismatchConfirmModal(null);
+                  act();
+                }}
+                disabled={isProcessing}
+                className="px-4 py-2.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+              >
+                {isProcessing && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                <span>Tiếp tục đồng bộ (Cập nhật thông tin)</span>
               </button>
             </div>
           </div>
