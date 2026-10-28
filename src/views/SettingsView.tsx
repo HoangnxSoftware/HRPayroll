@@ -65,11 +65,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   const [isLoadingSheetLegal, setIsLoadingSheetLegal] = useState(false);
   const [showLegalMismatchSaveModal, setShowLegalMismatchSaveModal] = useState(false);
 
-  // Chức năng cho phép tự động lưu toàn bộ cấu hình khi có thay đổi
+  // Chức năng cho phép tự động lưu toàn bộ cấu hình khi có thay đổi (Mặc định: BẬT)
   const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(() => {
     if (typeof settings.autoSaveSettings === 'boolean') return settings.autoSaveSettings;
     const saved = localStorage.getItem('payroll_auto_save_settings');
-    return saved === 'true';
+    if (saved !== null) return saved === 'true';
+    return true; // Mặc định bật
   });
   const [lastAutoSaveTime, setLastAutoSaveTime] = useState<string | null>(null);
   const [autoSaveBlockedDueToMismatch, setAutoSaveBlockedDueToMismatch] = useState(false);

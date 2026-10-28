@@ -71,6 +71,11 @@ export function sanitizeSettings(incoming?: Partial<SystemSettings> | null): Sys
     base.currentYear = INITIAL_SETTINGS.currentYear || 2026;
   }
 
+  // Đặt chế độ bật Tự động lưu cấu hình khi thay đổi là mặc định
+  if (base.autoSaveSettings === undefined) {
+    base.autoSaveSettings = true;
+  }
+
   return base;
 }
 

@@ -54,6 +54,9 @@ export const initialSettings: SystemSettings = {
   personalDeduction: 15500000, // 15,500,000 VND (Mức giảm trừ bản thân quy định mới)
   dependentDeduction: 6200000, // 6,200,000 VND (Mức giảm trừ người phụ thuộc quy định mới)
   taxBrackets: DEFAULT_TAX_BRACKETS, // Biểu thuế TNCN 5 bậc theo quy định hiện hành
+
+  // Chế độ mặc định Tự động lưu cấu hình khi thay đổi là đang bật
+  autoSaveSettings: true,
   
   // Cấu hình phương thức khấu trừ % thuế tại nguồn (mặc định 10%, có thể chỉnh sửa)
   taxWithholdingRateResident: 10, // 10% trước khi trả thu nhập nếu không ký HĐ hoặc HĐ dưới 3 tháng
