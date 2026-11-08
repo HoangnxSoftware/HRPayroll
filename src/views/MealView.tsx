@@ -50,6 +50,7 @@ export const MealView: React.FC<MealViewProps> = ({
   const currentMonthStr = `${settings.currentYear}-${String(settings.currentMonth).padStart(2, '0')}`;
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
+  const [filterMealPlan, setFilterMealPlan] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
 
@@ -233,12 +234,52 @@ export const MealView: React.FC<MealViewProps> = ({
     setIsBatchModalOpen(false);
   };
 
-  // Lọc danh sách nhân viên theo phòng ban & tìm kiếm
+  // Đếm số lượng theo hình thức đăng ký ăn ca
+  const mealPlanCounts = useMemo(() => {
+    let canteen = 0;
+    let cash = 0;
+    let cashFixed = 0;
+    let cashAttendance = 0;
+    let none = 0;
+
+    employees.forEach(emp => {
+      const reg = getEmployeeMealReg(emp.id);
+      const effectiveType = reg.mealType || (reg.planType === 'registered' ? 'canteen' : reg.planType) || 'canteen';
+      const cashMethod = reg.cashMethod || 'fixed';
+
+      if (effectiveType === 'canteen') {
+        canteen++;
+      } else if (effectiveType === 'cash') {
+        cash++;
+        if (cashMethod === 'by_attendance') cashAttendance++;
+        else cashFixed++;
+      } else if (effectiveType === 'none') {
+        none++;
+      }
+    });
+
+    return { canteen, cash, cashFixed, cashAttendance, none };
+  }, [employees, mealRegistrations, selectedMonth]);
+
+  // Lọc danh sách nhân viên theo phòng ban, hình thức đăng ký & tìm kiếm
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
       if (selectedDepartment !== 'all' && emp.departmentId !== selectedDepartment) {
         return false;
       }
+
+      if (filterMealPlan !== 'all') {
+        const reg = getEmployeeMealReg(emp.id);
+        const effectiveType = reg.mealType || (reg.planType === 'registered' ? 'canteen' : reg.planType) || 'canteen';
+        const cashMethod = reg.cashMethod || 'fixed';
+
+        if (filterMealPlan === 'canteen' && effectiveType !== 'canteen') return false;
+        if (filterMealPlan === 'cash' && effectiveType !== 'cash') return false;
+        if (filterMealPlan === 'cash_fixed' && (effectiveType !== 'cash' || cashMethod !== 'fixed')) return false;
+        if (filterMealPlan === 'cash_attendance' && (effectiveType !== 'cash' || cashMethod !== 'by_attendance')) return false;
+        if (filterMealPlan === 'none' && effectiveType !== 'none') return false;
+      }
+
       if (searchTerm.trim()) {
         const term = searchTerm.trim().toLowerCase();
         const deptName = depMap.get(emp.departmentId)?.toLowerCase() || '';
@@ -251,7 +292,7 @@ export const MealView: React.FC<MealViewProps> = ({
       }
       return true;
     });
-  }, [employees, selectedDepartment, searchTerm, depMap, posMap]);
+  }, [employees, selectedDepartment, filterMealPlan, searchTerm, depMap, posMap, mealRegistrations, selectedMonth]);
 
   // Toggle selection
   const isAllFilteredSelected = filteredEmployees.length > 0 && filteredEmployees.every(e => selectedEmployeeIds.includes(e.id));
@@ -553,11 +594,30 @@ export const MealView: React.FC<MealViewProps> = ({
               </select>
             </div>
 
-            {(searchTerm || selectedDepartment !== 'all') && (
+            {/* Lọc theo Hình Thức Đăng Ký Ăn Ca */}
+            <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+              <Utensils className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+              <span className="font-semibold text-slate-700">Hình Thức:</span>
+              <select
+                value={filterMealPlan}
+                onChange={e => setFilterMealPlan(e.target.value)}
+                className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer pr-1"
+              >
+                <option value="all">Tất cả hình thức đăng ký ({employees.length} người)</option>
+                <option value="canteen">Suất ăn tại bếp ({mealPlanCounts.canteen} người)</option>
+                <option value="cash">Nhận tiền mặt (Tất cả) ({mealPlanCounts.cash} người)</option>
+                <option value="cash_fixed">↳ Tiền mặt: Số tự điền / Khoán ({mealPlanCounts.cashFixed} người)</option>
+                <option value="cash_attendance">↳ Tiền mặt: Theo công thực tế ({mealPlanCounts.cashAttendance} người)</option>
+                <option value="none">Không ăn / Tự túc ({mealPlanCounts.none} người)</option>
+              </select>
+            </div>
+
+            {(searchTerm || selectedDepartment !== 'all' || filterMealPlan !== 'all') && (
               <button
                 onClick={() => {
                   setSearchTerm('');
                   setSelectedDepartment('all');
+                  setFilterMealPlan('all');
                 }}
                 className="px-2.5 py-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
                 title="Xóa bộ lọc"

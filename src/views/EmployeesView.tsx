@@ -23,7 +23,13 @@ import {
   Clock,
   Plus,
   Save,
-  TrendingUp
+  TrendingUp,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronUp,
+  ChevronDown,
+  MoveVertical
 } from 'lucide-react';
 import { Employee, Department, Position, SystemSettings, WorkHistoryItem, WorkStatus, SalaryCalculationBasis, InsuranceRecord } from '../types';
 import { formatVND, getEmployeeWorkStatusDetails, syncEmployeeWorkHistory, getEffectiveInsuranceSalaryForPeriod } from '../utils/payrollCalculator';
@@ -45,6 +51,7 @@ interface EmployeesViewProps {
   onUpdateEmployeeSalary?: (employeeId: string, newSalary: number) => void;
   onUpdateEmployee?: (employee: Employee) => void;
   onUpdateSettings?: (newSettings: SystemSettings) => void;
+  onReorderEmployees?: (newEmployees: Employee[]) => void;
 }
 
 export const EmployeesView: React.FC<EmployeesViewProps> = ({
@@ -59,7 +66,8 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   onImportEmployees,
   onUpdateEmployeeSalary,
   onUpdateEmployee,
-  onUpdateSettings
+  onUpdateSettings,
+  onReorderEmployees
 }) => {
   const { canEditEmployees, canExportData } = useAuthRole();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,6 +92,50 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   // Chỉnh sửa nhanh mức lương đến hàng đơn vị (vd: 525.454 hoặc 525454)
   const [editingSalaryEmpId, setEditingSalaryEmpId] = useState<string | null>(null);
   const [salaryInputText, setSalaryInputText] = useState<string>('');
+
+  // Sắp xếp danh sách người lao động
+  type EmployeeSortField = 'none' | 'employeeCode' | 'fullName' | 'idCardNumber' | 'department' | 'position' | 'workStatus';
+  const [sortField, setSortField] = useState<EmployeeSortField>('none');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const handleToggleSort = (field: EmployeeSortField) => {
+    if (sortField === field) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else {
+        setSortField('none');
+        setSortDirection('asc');
+      }
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Thay đổi vị trí người lao động
+  const handleMoveEmployee = (empId: string, direction: 'up' | 'down') => {
+    const currentIndex = employees.findIndex(e => e.id === empId);
+    if (currentIndex === -1) return;
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= employees.length) return;
+
+    const newEmployees = [...employees];
+    const [moved] = newEmployees.splice(currentIndex, 1);
+    newEmployees.splice(targetIndex, 0, moved);
+
+    // Khi di chuyển thủ công, trả về thứ tự tùy chỉnh
+    setSortField('none');
+    onReorderEmployees?.(newEmployees);
+  };
+
+  const handleSaveCurrentSortAsDefault = (sortedList: Employee[]) => {
+    if (onReorderEmployees) {
+      onReorderEmployees(sortedList);
+      setSortField('none');
+      setImportNotification('Đã lưu thứ tự sắp xếp hiện tại làm vị trí mặc định của danh sách nhân sự!');
+      setTimeout(() => setImportNotification(null), 3500);
+    }
+  };
 
   // 1. PHÁT HIỆN LAO ĐỘNG TRÙNG SỐ CĂN CƯỚC CÔNG DÂN (CCCD)
   const duplicateCccdMap = useMemo(() => {
@@ -381,7 +433,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
     setIsBatchContractsModalOpen(true);
   };
 
-  const filteredEmployees = employees.filter(emp => {
+  const baseFilteredEmployees = employees.filter(emp => {
     const matchSearch = 
       emp.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       emp.employeeCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -394,6 +446,38 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
 
     return matchSearch && matchDep && matchStatus && matchDupe;
   });
+
+  const sortedEmployees = useMemo(() => {
+    if (sortField === 'none') return baseFilteredEmployees;
+
+    return [...baseFilteredEmployees].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === 'employeeCode') {
+        cmp = a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = a.fullName.localeCompare(b.fullName, 'vi');
+      } else if (sortField === 'idCardNumber') {
+        cmp = (a.idCardNumber || '').localeCompare(b.idCardNumber || '', 'vi', { numeric: true });
+      } else if (sortField === 'department') {
+        const depA = depMap.get(a.departmentId) || '';
+        const depB = depMap.get(b.departmentId) || '';
+        cmp = depA.localeCompare(depB, 'vi');
+      } else if (sortField === 'position') {
+        const posA = posMap.get(a.positionId) || '';
+        const posB = posMap.get(b.positionId) || '';
+        cmp = posA.localeCompare(posB, 'vi');
+      } else if (sortField === 'workStatus') {
+        const statusA = a.workStatus || 'active';
+        const statusB = b.workStatus || 'active';
+        cmp = statusA.localeCompare(statusB, 'vi');
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [baseFilteredEmployees, sortField, sortDirection, depMap, posMap]);
+
+  const filteredEmployees = sortedEmployees;
+
+
 
   const toggleSelectEmp = (id: string) => {
     setSelectedEmpIds(prev => {
@@ -615,6 +699,35 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           </select>
         </div>
 
+        {/* Sắp xếp danh sách */}
+        <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5">
+          <ArrowUpDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap">Sắp xếp:</span>
+          <select
+            value={sortField}
+            onChange={e => setSortField(e.target.value as any)}
+            className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer flex-1"
+          >
+            <option value="none">Thứ tự tùy chỉnh (Mặc định)</option>
+            <option value="employeeCode">Mã NV</option>
+            <option value="fullName">Họ và Tên</option>
+            <option value="idCardNumber">Số CCCD / MST</option>
+            <option value="department">Phòng Ban</option>
+            <option value="position">Chức Vụ</option>
+            <option value="workStatus">Trạng Thái Làm Việc</option>
+          </select>
+          {sortField !== 'none' && (
+            <button
+              type="button"
+              onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+              className="p-1 text-slate-600 hover:text-emerald-700 hover:bg-slate-200 rounded transition-colors"
+              title={sortDirection === 'asc' ? 'Đang tăng dần (A → Z). Nhấn để giảm dần' : 'Đang giảm dần (Z → A). Nhấn để tăng dần'}
+            >
+              {sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />}
+            </button>
+          )}
+        </div>
+
         {/* Lọc nhanh lao động trùng CCCD */}
         <div>
           <button
@@ -634,6 +747,41 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Lưu thứ tự sắp xếp làm mặc định */}
+      {sortField !== 'none' && canEditEmployees && onReorderEmployees && (
+        <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-3 text-xs text-blue-900 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="w-4 h-4 text-blue-600 shrink-0" />
+            <span>
+              Đang xem danh sách sắp xếp theo: <strong>{
+                sortField === 'employeeCode' ? 'Mã NV' :
+                sortField === 'fullName' ? 'Họ và Tên' :
+                sortField === 'idCardNumber' ? 'Số CCCD' :
+                sortField === 'department' ? 'Phòng Ban' :
+                sortField === 'position' ? 'Chức Vụ' : 'Trạng Thái'
+              }</strong> ({sortDirection === 'asc' ? 'A → Z' : 'Z → A'}).
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleSaveCurrentSortAsDefault(sortedEmployees)}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Lưu thứ tự này làm mặc định</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortField('none')}
+              className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold rounded-lg transition-colors cursor-pointer"
+            >
+              Đặt lại thứ tự
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Thanh tác vụ chọn hàng loạt (Batch Action Bar) */}
       {selectedEmpIds.size > 0 && (
@@ -692,15 +840,97 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                     title="Chọn tất cả danh sách đang hiển thị để in hàng loạt"
                   />
                 </th>
-                <th className="px-4 py-3">Mã NV</th>
-                <th className="px-4 py-3">Họ và Tên</th>
-                <th className="px-4 py-3">
-                  <div>Số CCCD / Mã Số Thuế TNCN</div>
-                  <div className="text-[10px] font-normal text-emerald-600 normal-case">MST TNCN chính là số CCCD</div>
+                <th className="w-16 px-2 py-3 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <MoveVertical className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Vị trí</span>
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('employeeCode')} 
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Mã nhân viên"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Mã NV</span>
+                    {sortField === 'employeeCode' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('fullName')} 
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Họ và Tên"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Họ và Tên</span>
+                    {sortField === 'fullName' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('idCardNumber')} 
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Số CCCD"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div>Số CCCD / MST TNCN</div>
+                      <div className="text-[10px] font-normal text-emerald-600 normal-case">MST TNCN chính là số CCCD</div>
+                    </div>
+                    {sortField === 'idCardNumber' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600 ml-1" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70 ml-1" />
+                    )}
+                  </div>
                 </th>
                 <th className="px-4 py-3">Số Điện Thoại</th>
-                <th className="px-4 py-3">Phòng Ban & Chức Vụ</th>
-                <th className="px-4 py-3">Trạng Thái</th>
+                <th className="px-4 py-3 select-none">
+                  <div className="flex items-center gap-2">
+                    <span 
+                      onClick={() => handleToggleSort('department')}
+                      className="cursor-pointer hover:text-emerald-700 transition-colors inline-flex items-center gap-1"
+                      title="Sắp xếp theo Phòng Ban"
+                    >
+                      <span>Phòng Ban</span>
+                      {sortField === 'department' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-600" /> : <ArrowDown className="w-3 h-3 text-emerald-600" />
+                      )}
+                    </span>
+                    <span>&</span>
+                    <span 
+                      onClick={() => handleToggleSort('position')}
+                      className="cursor-pointer hover:text-emerald-700 transition-colors inline-flex items-center gap-1"
+                      title="Sắp xếp theo Chức Vụ"
+                    >
+                      <span>Chức Vụ</span>
+                      {sortField === 'position' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-600" /> : <ArrowDown className="w-3 h-3 text-emerald-600" />
+                      )}
+                    </span>
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('workStatus')} 
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Trạng Thái"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Trạng Thái</span>
+                    {sortField === 'workStatus' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
                 <th className="px-4 py-3">Hình Thức Lương</th>
                 <th className="px-4 py-3 text-right">
                   <div>Lương Cơ Bản / HĐ</div>
@@ -714,7 +944,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-6 py-8 text-center text-slate-400">
+                  <td colSpan={13} className="px-6 py-8 text-center text-slate-400">
                     Không tìm thấy nhân viên nào phù hợp với bộ lọc tìm kiếm.
                   </td>
                 </tr>
@@ -744,6 +974,37 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                           onChange={() => toggleSelectEmp(emp.id)}
                           className="rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                         />
+                      </td>
+
+                      {/* Thay đổi vị trí / Thứ tự */}
+                      <td className="px-2 py-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <span className="font-mono text-[11px] font-bold text-slate-400 w-5 text-right">
+                            #{employees.findIndex(e => e.id === emp.id) + 1}
+                          </span>
+                          {canEditEmployees && (
+                            <div className="flex flex-col gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => handleMoveEmployee(emp.id, 'up')}
+                                disabled={employees.findIndex(e => e.id === emp.id) === 0}
+                                className="p-0.5 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded disabled:opacity-20 disabled:hover:bg-transparent cursor-pointer"
+                                title="Di chuyển lên trên"
+                              >
+                                <ChevronUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveEmployee(emp.id, 'down')}
+                                disabled={employees.findIndex(e => e.id === emp.id) === employees.length - 1}
+                                className="p-0.5 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded disabled:opacity-20 disabled:hover:bg-transparent cursor-pointer"
+                                title="Di chuyển xuống dưới"
+                              >
+                                <ChevronDown className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </td>
 
                       <td className="px-4 py-3.5 font-mono font-bold text-slate-900">

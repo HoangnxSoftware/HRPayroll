@@ -830,6 +830,7 @@ function PayrollAppContent() {
               onUpdateEmployeeSalary={handleUpdateEmployeeSalary}
               onUpdateEmployee={handleSaveEmployee}
               onUpdateSettings={setSettings}
+              onReorderEmployees={setEmployees}
             />
           )}
 
@@ -840,6 +841,7 @@ function PayrollAppContent() {
               settings={settings}
               onUpdateInsurance={handleUpdateInsurance}
               onUpdateSettings={setSettings}
+              onReorderEmployees={setEmployees}
             />
           )}
 

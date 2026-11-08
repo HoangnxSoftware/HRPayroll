@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { Users, UserPlus, Trash2, Edit3, Download, Search, CheckCircle2, ShieldAlert, Upload, FileSpreadsheet, Printer, AlertTriangle } from 'lucide-react';
+import { Users, UserPlus, Trash2, Edit3, Download, Search, CheckCircle2, ShieldAlert, Upload, FileSpreadsheet, Printer, AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, Filter, AlertCircle } from 'lucide-react';
 import { Dependent, Employee, RelationshipType, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
 import { downloadDependentTemplate, readDependentExcel } from '../utils/excelHelper';
@@ -64,6 +64,20 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
     }).slice(0, 25);
   }, [employees, empSearchQuery]);
 
+  // Tính tuổi chính xác bằng số
+  const getNumericAge = (birthDateStr?: string): number | null => {
+    if (!birthDateStr) return null;
+    const b = new Date(birthDateStr);
+    if (isNaN(b.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - b.getFullYear();
+    const m = today.getMonth() - b.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < b.getDate())) {
+      age--;
+    }
+    return age >= 0 ? age : null;
+  };
+
   const calculateAge = (birthDateStr?: string) => {
     if (!birthDateStr) return '—';
     const b = new Date(birthDateStr);
@@ -91,31 +105,112 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
     return dupSet;
   }, [employees]);
 
-  // Tập hợp số CCCD/Mã số NPT bị trùng lặp giữa các người phụ thuộc
-  const duplicateDepCards = useMemo(() => {
+  // Đếm và phát hiện trùng lặp CCCD/Mã số thuế của người phụ thuộc
+  const duplicateDepCounts = useMemo(() => {
     const counts = new Map<string, number>();
     dependents.forEach(d => {
       const cccd = (d.taxCodeOrId || '').trim();
       if (cccd) counts.set(cccd, (counts.get(cccd) || 0) + 1);
     });
+    return counts;
+  }, [dependents]);
+
+  const duplicateDepCards = useMemo(() => {
     const dupSet = new Set<string>();
-    counts.forEach((cnt, cccd) => {
+    duplicateDepCounts.forEach((cnt, cccd) => {
       if (cnt > 1) dupSet.add(cccd);
     });
     return dupSet;
+  }, [duplicateDepCounts]);
+
+  // Đếm tổng số người phụ thuộc bị trùng CCCD/MST
+  const totalDuplicateDepRecords = useMemo(() => {
+    return dependents.filter(d => {
+      const cccd = (d.taxCodeOrId || '').trim();
+      return cccd && duplicateDepCards.has(cccd);
+    }).length;
+  }, [dependents, duplicateDepCards]);
+
+  // Đếm số người phụ thuộc trên 18 tuổi
+  const totalOver18Dependents = useMemo(() => {
+    return dependents.filter(d => {
+      const age = getNumericAge(d.birthDate);
+      return age !== null && age >= 18;
+    }).length;
   }, [dependents]);
 
-  const filteredDependents = dependents.filter(dep => {
+  // State lọc cảnh báo và sắp xếp
+  const [filterDuplicateDepOnly, setFilterDuplicateDepOnly] = useState(false);
+  const [filterOver18Only, setFilterOver18Only] = useState(false);
+
+  type DependentSortField = 'none' | 'employee' | 'employeeCccd' | 'fullName' | 'taxCodeOrId' | 'birthDate' | 'deductionAmount';
+  const [sortField, setSortField] = useState<DependentSortField>('none');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const handleToggleSort = (field: DependentSortField) => {
+    if (sortField === field) {
+      if (sortDirection === 'asc') setSortDirection('desc');
+      else {
+        setSortField('none');
+        setSortDirection('asc');
+      }
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const baseFilteredDependents = dependents.filter(dep => {
     const emp = empMap.get(dep.employeeId);
     const search = searchTerm.toLowerCase();
-    return (
+    const matchSearch = 
       dep.fullName.toLowerCase().includes(search) ||
       dep.taxCodeOrId.toLowerCase().includes(search) ||
       (emp && emp.fullName.toLowerCase().includes(search)) ||
       (emp && emp.employeeCode.toLowerCase().includes(search)) ||
-      (emp && emp.idCardNumber && emp.idCardNumber.toLowerCase().includes(search))
-    );
+      (emp && emp.idCardNumber && emp.idCardNumber.toLowerCase().includes(search));
+
+    const cccdClean = (dep.taxCodeOrId || '').trim();
+    const isDupe = cccdClean ? duplicateDepCards.has(cccdClean) : false;
+    const matchDuplicate = !filterDuplicateDepOnly || isDupe;
+
+    const age = getNumericAge(dep.birthDate);
+    const isOver18 = age !== null && age >= 18;
+    const matchOver18 = !filterOver18Only || isOver18;
+
+    return matchSearch && matchDuplicate && matchOver18;
   });
+
+  const sortedDependents = useMemo(() => {
+    if (sortField === 'none') return baseFilteredDependents;
+
+    return [...baseFilteredDependents].sort((a, b) => {
+      let cmp = 0;
+      const empA = empMap.get(a.employeeId);
+      const empB = empMap.get(b.employeeId);
+
+      if (sortField === 'employee') {
+        const nameA = empA?.fullName || '';
+        const nameB = empB?.fullName || '';
+        cmp = nameA.localeCompare(nameB, 'vi');
+      } else if (sortField === 'employeeCccd') {
+        const cccdA = empA?.idCardNumber || '';
+        const cccdB = empB?.idCardNumber || '';
+        cmp = cccdA.localeCompare(cccdB, 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = a.fullName.localeCompare(b.fullName, 'vi');
+      } else if (sortField === 'taxCodeOrId') {
+        cmp = (a.taxCodeOrId || '').localeCompare(b.taxCodeOrId || '', 'vi', { numeric: true });
+      } else if (sortField === 'birthDate') {
+        cmp = (a.birthDate || '').localeCompare(b.birthDate || '');
+      } else if (sortField === 'deductionAmount') {
+        cmp = (a.deductionAmount || 0) - (b.deductionAmount || 0);
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [baseFilteredDependents, sortField, sortDirection, empMap]);
+
+  const filteredDependents = sortedDependents;
 
   const handleOpenAdd = () => {
     setEditingDep(null);
@@ -312,18 +407,105 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
         </div>
       )}
 
-      {/* Search */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs text-xs">
-        <div className="relative max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            placeholder="Tìm theo Tên NPT, Tên Nhân Viên, Mã NV, CCCD..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-          />
+      {/* Search, Sort & Warning Filters */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs text-xs space-y-3">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          {/* Search Input */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              placeholder="Tìm theo Tên NPT, Tên Nhân Viên, Mã NV, CCCD..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            />
+          </div>
+
+          {/* Sắp xếp & Nút cảnh báo */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Sắp xếp */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5">
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <span className="font-bold text-slate-600 text-[11px] whitespace-nowrap">Sắp xếp:</span>
+              <select
+                value={sortField}
+                onChange={e => setSortField(e.target.value as any)}
+                className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="none">Mặc định</option>
+                <option value="employee">Nhân viên liên quan</option>
+                <option value="employeeCccd">Số CCCD người lao động</option>
+                <option value="fullName">Họ và Tên NPT</option>
+                <option value="taxCodeOrId">CCCD / Mã số NPT</option>
+                <option value="birthDate">Ngày sinh / Tuổi</option>
+                <option value="deductionAmount">Mức giảm trừ</option>
+              </select>
+              {sortField !== 'none' && (
+                <button
+                  type="button"
+                  onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+                  className="p-1 text-slate-600 hover:text-emerald-700 hover:bg-slate-200 rounded transition-colors"
+                  title={sortDirection === 'asc' ? 'Đang tăng dần (A → Z). Nhấn để giảm dần' : 'Đang giảm dần (Z → A). Nhấn để tăng dần'}
+                >
+                  {sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />}
+                </button>
+              )}
+            </div>
+
+            {/* Lọc cảnh báo trùng CCCD/MST người phụ thuộc */}
+            <button
+              type="button"
+              onClick={() => setFilterDuplicateDepOnly(!filterDuplicateDepOnly)}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer border text-xs ${
+                filterDuplicateDepOnly
+                  ? 'bg-red-600 text-white border-red-700 shadow-2xs'
+                  : totalDuplicateDepRecords > 0
+                    ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                    : 'bg-slate-100 text-slate-500 border-slate-200'
+              }`}
+              title="Lọc nhanh danh sách người phụ thuộc bị trùng CCCD hoặc Mã số thuế"
+            >
+              <AlertTriangle className={`w-3.5 h-3.5 ${filterDuplicateDepOnly ? 'text-white' : totalDuplicateDepRecords > 0 ? 'text-red-600' : 'text-slate-400'}`} />
+              <span>Báo trùng CCCD/MST NPT {totalDuplicateDepRecords > 0 ? `(${totalDuplicateDepRecords})` : ''}</span>
+            </button>
+
+            {/* Lọc cảnh báo người phụ thuộc trên 18 tuổi */}
+            <button
+              type="button"
+              onClick={() => setFilterOver18Only(!filterOver18Only)}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer border text-xs ${
+                filterOver18Only
+                  ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                  : totalOver18Dependents > 0
+                    ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                    : 'bg-slate-100 text-slate-500 border-slate-200'
+              }`}
+              title="Lọc nhanh người phụ thuộc từ 18 tuổi trở lên (cần xác minh điều kiện khuyết tật hoặc đang học ĐH/CĐ)"
+            >
+              <AlertCircle className={`w-3.5 h-3.5 ${filterOver18Only ? 'text-white' : totalOver18Dependents > 0 ? 'text-amber-700' : 'text-slate-400'}`} />
+              <span>Cảnh báo NPT ≥ 18 tuổi {totalOver18Dependents > 0 ? `(${totalOver18Dependents})` : ''}</span>
+            </button>
+          </div>
         </div>
+
+        {(filterDuplicateDepOnly || filterOver18Only || searchTerm) && (
+          <div className="flex items-center justify-between p-2 bg-slate-50 rounded-lg text-[11px] text-slate-600">
+            <span>
+              Đang lọc hiển thị <strong>{filteredDependents.length}</strong> / {dependents.length} người phụ thuộc.
+            </span>
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setFilterDuplicateDepOnly(false);
+                setFilterOver18Only(false);
+              }}
+              className="text-emerald-700 hover:underline font-bold"
+            >
+              Xóa bộ lọc
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -332,13 +514,78 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
           <table className="w-full text-xs text-left">
             <thead className="bg-slate-50 text-slate-600 uppercase font-semibold border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3">Nhân Viên Liên Quan</th>
-                <th className="px-4 py-3">Số CCCD NLĐ</th>
-                <th className="px-4 py-3">Họ và Tên NPT</th>
-                <th className="px-4 py-3">CCCD / Mã Số NPT</th>
+                <th 
+                  onClick={() => handleToggleSort('employee')}
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Nhân Viên Liên Quan"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Nhân Viên Liên Quan</span>
+                    {sortField === 'employee' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('employeeCccd')}
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Số CCCD Người Lao Động"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Số CCCD NLĐ</span>
+                    {sortField === 'employeeCccd' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('fullName')}
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Họ và Tên NPT"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Họ và Tên NPT</span>
+                    {sortField === 'fullName' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('taxCodeOrId')}
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo CCCD / Mã Số NPT"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>CCCD / Mã Số NPT</span>
+                    {sortField === 'taxCodeOrId' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
                 <th className="px-4 py-3">Mối Quan Hệ</th>
-                <th className="px-4 py-3">Ngày Sinh</th>
-                <th className="px-4 py-3 text-center">Tuổi</th>
+                <th 
+                  onClick={() => handleToggleSort('birthDate')}
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Ngày Sinh"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Ngày Sinh</span>
+                    {sortField === 'birthDate' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th className="px-4 py-3 text-center">Tuổi & Cảnh Báo</th>
                 <th className="px-4 py-3">Thời Gian Giảm Trừ</th>
                 <th className="px-4 py-3 text-right">Mức Giảm Trừ</th>
                 <th className="px-4 py-3">Ghi Chú</th>
@@ -379,16 +626,15 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
                       <td className="px-4 py-3.5 font-bold text-slate-800 text-sm">
                         {dep.fullName}
                       </td>
-                      <td className="px-4 py-3.5 font-mono text-slate-700">
-                        <div>{dep.taxCodeOrId || '-'}</div>
+                      <td className="px-4 py-3.5 font-mono">
+                        <div className={`font-semibold ${isDuplicateDepCccd ? 'text-red-700 font-black text-[13px]' : 'text-slate-800'}`}>
+                          {dep.taxCodeOrId || '-'}
+                        </div>
                         {isDuplicateDepCccd && (
-                          <span 
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[9px] mt-0.5 whitespace-nowrap shadow-2xs"
-                            title="Số CCCD / Mã định danh người phụ thuộc này trùng với một hồ sơ NPT khác"
-                          >
-                            <AlertTriangle className="w-2.5 h-2.5 text-amber-700" />
-                            Trùng NPT
-                          </span>
+                          <div className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded bg-red-100 text-red-900 border border-red-300 font-bold text-[10px] whitespace-nowrap shadow-2xs">
+                            <AlertTriangle className="w-3 h-3 text-red-600 shrink-0" />
+                            <span>BÁO TRÙNG CCCD/MST NPT ({duplicateDepCounts.get((dep.taxCodeOrId || '').trim())} hồ sơ)</span>
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-3.5">
@@ -399,8 +645,27 @@ export const DependentsView: React.FC<DependentsViewProps> = ({
                       <td className="px-4 py-3.5 text-slate-600 font-mono">
                         {dep.birthDate}
                       </td>
-                      <td className="px-4 py-3.5 text-center font-mono font-bold text-slate-700">
-                        {calculateAge(dep.birthDate)}
+                      <td className="px-4 py-3.5 text-center font-mono">
+                        {(() => {
+                          const numAge = getNumericAge(dep.birthDate);
+                          const isOver18 = numAge !== null && numAge >= 18;
+                          return (
+                            <div className="flex flex-col items-center">
+                              <span className={`font-bold ${isOver18 ? 'text-amber-950 font-black' : 'text-slate-700'}`}>
+                                {calculateAge(dep.birthDate)}
+                              </span>
+                              {isOver18 && (
+                                <span 
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-950 border border-amber-300 font-extrabold text-[9px] mt-0.5 whitespace-nowrap shadow-2xs"
+                                  title="Cảnh báo: Người phụ thuộc từ 18 tuổi trở lên. Theo quy định, con trên 18 tuổi chỉ được giảm trừ nếu bị khuyết tật không có khả năng lao động hoặc đang theo học đại học/cao đẳng."
+                                >
+                                  <AlertCircle className="w-2.5 h-2.5 text-amber-700 shrink-0" />
+                                  <span>≥ 18T (Cần xác minh)</span>
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3.5 font-mono text-slate-700">
                         <span>{dep.startDate}</span>

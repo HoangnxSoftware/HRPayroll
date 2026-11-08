@@ -26,7 +26,13 @@ import {
   Users,
   Building2,
   ChevronRight,
-  CalendarRange
+  CalendarRange,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronUp,
+  ChevronDown,
+  MoveVertical
 } from 'lucide-react';
 import { InsuranceRecord, Employee, SystemSettings, InsuranceSalaryHistory, InsuranceRatePeriod } from '../types';
 import { formatVND, isEmployeeActiveInMonth, getInsuranceRatesForMonth, getAvailableYears, getEffectiveInsuranceSalaryForMonth } from '../utils/payrollCalculator';
@@ -42,6 +48,7 @@ interface InsuranceViewProps {
   settings: SystemSettings;
   onUpdateInsurance: (updated: InsuranceRecord) => void;
   onUpdateSettings?: (newSettings: SystemSettings) => void;
+  onReorderEmployees?: (newEmployees: Employee[]) => void;
 }
 
 export const InsuranceView: React.FC<InsuranceViewProps> = ({
@@ -49,7 +56,8 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
   employees,
   settings,
   onUpdateInsurance,
-  onUpdateSettings
+  onUpdateSettings,
+  onReorderEmployees
 }) => {
   const { canEditEmployees, canExportData, canEditSettings } = useAuthRole();
   const [activeTab, setActiveTab] = useState<'monthly' | 'annual'>('monthly');
@@ -58,6 +66,46 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
   const [annualViewMode, setAnnualViewMode] = useState<'12_months' | 'funds_breakdown'>('12_months');
+
+  // Sắp xếp bảo hiểm xã hội
+  type InsuranceSortField = 'none' | 'employeeCode' | 'idCardNumber' | 'fullName' | 'department' | 'position';
+  const [sortField, setSortField] = useState<InsuranceSortField>('none');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const handleToggleSort = (field: InsuranceSortField) => {
+    if (sortField === field) {
+      if (sortDirection === 'asc') setSortDirection('desc');
+      else {
+        setSortField('none');
+        setSortDirection('asc');
+      }
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Thay đổi vị trí nhân viên trong bảo hiểm xã hội
+  const handleMoveEmployee = (empId: string, direction: 'up' | 'down') => {
+    const currentIndex = employees.findIndex(e => e.id === empId);
+    if (currentIndex === -1) return;
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= employees.length) return;
+
+    const newEmployees = [...employees];
+    const [moved] = newEmployees.splice(currentIndex, 1);
+    newEmployees.splice(targetIndex, 0, moved);
+
+    setSortField('none');
+    onReorderEmployees?.(newEmployees);
+  };
+
+  const handleSaveCurrentSortAsDefault = (sortedList: Employee[]) => {
+    if (onReorderEmployees) {
+      onReorderEmployees(sortedList);
+      setSortField('none');
+    }
+  };
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [isAnnualPrintModalOpen, setIsAnnualPrintModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -276,9 +324,9 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
     });
   }, [employees, insurances, settings, selectedYear, depMap, posMap]);
 
-  // Bộ lọc danh sách nhân viên tháng
+  // Bộ lọc và sắp xếp danh sách nhân viên tháng
   const filteredEmployees = useMemo(() => {
-    return employees.filter(emp => {
+    const base = employees.filter(emp => {
       const matchDep = filterDepartment === 'all' || emp.departmentId === filterDepartment;
       const q = searchTerm.toLowerCase().trim();
       const matchSearch = !q || 
@@ -287,7 +335,29 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
         (emp.idCardNumber && emp.idCardNumber.toLowerCase().includes(q));
       return matchDep && matchSearch;
     });
-  }, [employees, filterDepartment, searchTerm]);
+
+    if (sortField === 'none') return base;
+
+    return [...base].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === 'employeeCode') {
+        cmp = a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+      } else if (sortField === 'idCardNumber') {
+        cmp = (a.idCardNumber || '').localeCompare(b.idCardNumber || '', 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = a.fullName.localeCompare(b.fullName, 'vi');
+      } else if (sortField === 'department') {
+        const depA = depMap.get(a.departmentId) || '';
+        const depB = depMap.get(b.departmentId) || '';
+        cmp = depA.localeCompare(depB, 'vi');
+      } else if (sortField === 'position') {
+        const posA = posMap.get(a.positionId) || '';
+        const posB = posMap.get(b.positionId) || '';
+        cmp = posA.localeCompare(posB, 'vi');
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [employees, filterDepartment, searchTerm, sortField, sortDirection, depMap, posMap]);
 
   // Bộ lọc báo cáo cả năm
   const filteredAnnualData = useMemo(() => {
@@ -816,20 +886,83 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 w-full lg:w-auto">
-              <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-              <select
-                value={filterDepartment}
-                onChange={e => setFilterDepartment(e.target.value)}
-                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium cursor-pointer"
-              >
-                <option value="all">Tất cả phòng ban ({employees.length})</option>
-                {settings.departments.map(d => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
+            <div className="flex items-center gap-2 w-full lg:w-auto flex-wrap">
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs">
+                <ArrowUpDown className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                <span className="font-bold text-slate-600 text-[11px]">Sắp xếp:</span>
+                <select
+                  value={sortField}
+                  onChange={e => setSortField(e.target.value as any)}
+                  className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
+                >
+                  <option value="none">Thứ tự tùy chỉnh</option>
+                  <option value="employeeCode">Mã NV</option>
+                  <option value="idCardNumber">Số CCCD</option>
+                  <option value="fullName">Họ và Tên</option>
+                  <option value="department">Phòng Ban</option>
+                  <option value="position">Chức Vụ</option>
+                </select>
+                {sortField !== 'none' && (
+                  <button
+                    type="button"
+                    onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+                    className="p-0.5 text-slate-600 hover:text-purple-700 hover:bg-slate-200 rounded transition-colors"
+                    title={sortDirection === 'asc' ? 'Đang tăng dần (A → Z). Nhấn để giảm dần' : 'Đang giảm dần (Z → A). Nhấn để tăng dần'}
+                  >
+                    {sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-600" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-600" />}
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Filter className="w-4 h-4 text-slate-400 shrink-0" />
+                <select
+                  value={filterDepartment}
+                  onChange={e => setFilterDepartment(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium cursor-pointer"
+                >
+                  <option value="all">Tất cả phòng ban ({employees.length})</option>
+                  {settings.departments.map(d => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
+
+                    {/* Banner lưu thứ tự sắp xếp */}
+          {sortField !== 'none' && canEditEmployees && onReorderEmployees && (
+            <div className="p-2.5 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-between gap-3 text-xs text-purple-900 animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <ArrowUpDown className="w-4 h-4 text-purple-600 shrink-0" />
+                <span>
+                  Đang sắp xếp BHXH theo: <strong>{
+                    sortField === 'employeeCode' ? 'Mã NV' :
+                    sortField === 'idCardNumber' ? 'Số CCCD' :
+                    sortField === 'fullName' ? 'Họ và Tên' :
+                    sortField === 'department' ? 'Phòng Ban' : 'Chức Vụ'
+                  }</strong> ({sortDirection === 'asc' ? 'A → Z' : 'Z → A'}).
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSaveCurrentSortAsDefault(filteredEmployees)}
+                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Lưu thứ tự này làm mặc định</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSortField('none')}
+                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  Đặt lại thứ tự
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Insurance Table */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -837,10 +970,79 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 text-slate-600 uppercase font-semibold border-b border-slate-200">
                   <tr>
-                    <th className="px-4 py-3">Mã NV</th>
-                    <th className="px-4 py-3 min-w-[95px]">Số CCCD</th>
-                    <th className="px-4 py-3">Họ và Tên</th>
-                    <th className="px-4 py-3">Phòng Ban</th>
+                    <th className="w-16 px-2 py-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <MoveVertical className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Vị trí</span>
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => handleToggleSort('employeeCode')}
+                      className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                      title="Sắp xếp theo Mã nhân viên"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>Mã NV</span>
+                        {sortField === 'employeeCode' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-600" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => handleToggleSort('idCardNumber')}
+                      className="px-4 py-3 min-w-[95px] cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                      title="Sắp xếp theo Số CCCD"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>Số CCCD</span>
+                        {sortField === 'idCardNumber' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-600" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => handleToggleSort('fullName')}
+                      className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                      title="Sắp xếp theo Họ và Tên"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>Họ và Tên</span>
+                        {sortField === 'fullName' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-purple-600" /> : <ArrowDown className="w-3.5 h-3.5 text-purple-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                        )}
+                      </div>
+                    </th>
+                    <th className="px-4 py-3 select-none">
+                      <div className="flex items-center gap-2">
+                        <span
+                          onClick={() => handleToggleSort('department')}
+                          className="cursor-pointer hover:text-purple-700 transition-colors inline-flex items-center gap-1"
+                          title="Sắp xếp theo Phòng Ban"
+                        >
+                          <span>Phòng Ban</span>
+                          {sortField === 'department' && (
+                            sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-purple-600" /> : <ArrowDown className="w-3 h-3 text-purple-600" />
+                          )}
+                        </span>
+                        <span>/</span>
+                        <span
+                          onClick={() => handleToggleSort('position')}
+                          className="cursor-pointer hover:text-purple-700 transition-colors inline-flex items-center gap-1"
+                          title="Sắp xếp theo Chức Vụ"
+                        >
+                          <span>Chức Vụ</span>
+                          {sortField === 'position' && (
+                            sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-purple-600" /> : <ArrowDown className="w-3 h-3 text-purple-600" />
+                          )}
+                        </span>
+                      </div>
+                    </th>
                     <th className="px-4 py-3 text-center">Bắt Đầu Đóng</th>
                     <th className="px-4 py-3 text-center">Tham Gia</th>
                     <th className="px-4 py-3 text-right">Lương Đóng BHXH</th>
@@ -855,7 +1057,7 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredEmployees.length === 0 ? (
                     <tr>
-                      <td colSpan={13} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={14} className="px-4 py-8 text-center text-slate-400">
                         Không tìm thấy nhân viên nào phù hợp bộ lọc.
                       </td>
                     </tr>

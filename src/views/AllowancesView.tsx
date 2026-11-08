@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Gift, Plus, Trash2, Edit3, Download, Search, CheckCircle2, ShieldCheck, DollarSign, Upload, FileSpreadsheet, Printer } from 'lucide-react';
+import { Gift, Plus, Trash2, Edit3, Download, Search, CheckCircle2, ShieldCheck, DollarSign, Upload, FileSpreadsheet, Printer, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Filter } from 'lucide-react';
 import { SpecialAllowance, Employee, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
 import { downloadAllowanceTemplate, readAllowanceExcel } from '../utils/excelHelper';
@@ -28,6 +28,35 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
 }) => {
   const { canEditEmployees, canExportData } = useAuthRole();
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterMonth, setFilterMonth] = useState<string>('all');
+
+  type AllowanceSortField = 'none' | 'employee' | 'taxClassification' | 'month' | 'amount' | 'name';
+  const [sortField, setSortField] = useState<AllowanceSortField>('none');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const handleToggleSort = (field: AllowanceSortField) => {
+    if (sortField === field) {
+      if (sortDirection === 'asc') setSortDirection('desc');
+      else {
+        setSortField('none');
+        setSortDirection('asc');
+      }
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Danh sách các tháng có dữ liệu phụ cấp
+  const availableMonths = React.useMemo(() => {
+    const set = new Set<string>();
+    const cur = String(settings?.currentYear || 2026) + '-' + String(settings?.currentMonth || 9).padStart(2, '0');
+    set.add(cur);
+    specialAllowances.forEach(a => {
+      if (a.month) set.add(a.month);
+    });
+    return Array.from(set).sort().reverse();
+  }, [specialAllowances, settings]);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<SpecialAllowance | null>(null);
@@ -46,15 +75,47 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
 
   const empMap = new Map(employees.map(e => [e.id, e]));
 
-  const filteredAllowances = specialAllowances.filter(a => {
+  const baseFilteredAllowances = specialAllowances.filter(a => {
     const emp = empMap.get(a.employeeId);
     const search = searchTerm.toLowerCase();
-    return (
+    const matchSearch = 
       a.name.toLowerCase().includes(search) ||
       (emp && emp.fullName.toLowerCase().includes(search)) ||
-      (emp && emp.employeeCode.toLowerCase().includes(search))
-    );
+      (emp && emp.employeeCode.toLowerCase().includes(search));
+
+    const matchMonth = filterMonth === 'all' || a.month === filterMonth;
+    return matchSearch && matchMonth;
   });
+
+  const sortedAllowances = React.useMemo(() => {
+    if (sortField === 'none') return baseFilteredAllowances;
+
+    return [...baseFilteredAllowances].sort((a, b) => {
+      let cmp = 0;
+      const empA = empMap.get(a.employeeId);
+      const empB = empMap.get(b.employeeId);
+
+      if (sortField === 'employee') {
+        const nameA = empA?.fullName || '';
+        const nameB = empB?.fullName || '';
+        cmp = nameA.localeCompare(nameB, 'vi');
+      } else if (sortField === 'taxClassification') {
+        const taxA = a.isTaxable ? 1 : 0;
+        const taxB = b.isTaxable ? 1 : 0;
+        cmp = taxA - taxB;
+      } else if (sortField === 'month') {
+        cmp = (a.month || '').localeCompare(b.month || '');
+      } else if (sortField === 'amount') {
+        cmp = (a.amount || 0) - (b.amount || 0);
+      } else if (sortField === 'name') {
+        cmp = a.name.localeCompare(b.name, 'vi');
+      }
+
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [baseFilteredAllowances, sortField, sortDirection, empMap]);
+
+  const filteredAllowances = sortedAllowances;
 
   // Calculate totals
   const totalTaxable = specialAllowances.filter(a => a.isTaxable).reduce((sum, a) => sum + a.amount, 0);
@@ -260,18 +321,88 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
         </div>
       </div>
 
-      {/* Search */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs text-xs">
-        <div className="relative max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            placeholder="Tìm theo Tên Phụ Cấp, Tên Nhân Viên, Mã NV..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-          />
+      {/* Search, Lọc theo tháng & Sắp xếp */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs text-xs space-y-3">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          {/* Search Input */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              placeholder="Tìm theo Tên Phụ Cấp, Tên Nhân Viên, Mã NV..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Lọc theo tháng áp dụng */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5">
+              <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="font-bold text-slate-600 text-[11px] whitespace-nowrap">Tháng áp dụng:</span>
+              <select
+                value={filterMonth}
+                onChange={e => setFilterMonth(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="all">Tất cả các tháng ({specialAllowances.length})</option>
+                {availableMonths.map(m => (
+                  <option key={m} value={m}>
+                    Tháng {m.split('-')[1]}/{m.split('-')[0]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Sắp xếp */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5">
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <span className="font-bold text-slate-600 text-[11px] whitespace-nowrap">Sắp xếp:</span>
+              <select
+                value={sortField}
+                onChange={e => setSortField(e.target.value as any)}
+                className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="none">Mặc định</option>
+                <option value="employee">Nhân viên hưởng</option>
+                <option value="taxClassification">Phân loại thuế TNCN</option>
+                <option value="month">Tháng áp dụng</option>
+                <option value="amount">Số tiền phụ cấp</option>
+                <option value="name">Tên khoản phụ cấp</option>
+              </select>
+              {sortField !== 'none' && (
+                <button
+                  type="button"
+                  onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+                  className="p-1 text-slate-600 hover:text-emerald-700 hover:bg-slate-200 rounded transition-colors"
+                  title={sortDirection === 'asc' ? 'Đang tăng dần (A → Z). Nhấn để giảm dần' : 'Đang giảm dần (Z → A). Nhấn để tăng dần'}
+                >
+                  {sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
+
+        {(filterMonth !== 'all' || searchTerm || sortField !== 'none') && (
+          <div className="flex items-center justify-between p-2 bg-slate-50 rounded-lg text-[11px] text-slate-600">
+            <span>
+              Đang hiển thị <strong>{filteredAllowances.length}</strong> / {specialAllowances.length} khoản phụ cấp
+              {filterMonth !== 'all' && <> cho <strong>Tháng {filterMonth.split('-')[1]}/{filterMonth.split('-')[0]}</strong></>}.
+            </span>
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setFilterMonth('all');
+                setSortField('none');
+              }}
+              className="text-emerald-700 hover:underline font-bold"
+            >
+              Xóa bộ lọc & sắp xếp
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -280,11 +411,76 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
           <table className="w-full text-xs text-left">
             <thead className="bg-slate-50 text-slate-600 uppercase font-semibold border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3">Nhân Viên Hưởng</th>
-                <th className="px-4 py-3">Tên Khoản Phụ Cấp</th>
-                <th className="px-4 py-3 text-right">Số Tiền (VNĐ)</th>
-                <th className="px-4 py-3 text-center">Phân Loại Thuế TNCN</th>
-                <th className="px-4 py-3 font-mono">Tháng Áp Dụng</th>
+                <th 
+                  onClick={() => handleToggleSort('employee')}
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Nhân Viên Hưởng"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Nhân Viên Hưởng</span>
+                    {sortField === 'employee' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('name')}
+                  className="px-4 py-3 cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Tên Khoản Phụ Cấp"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Tên Khoản Phụ Cấp</span>
+                    {sortField === 'name' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('amount')}
+                  className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Số Tiền"
+                >
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span>Số Tiền (VNĐ)</span>
+                    {sortField === 'amount' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('taxClassification')}
+                  className="px-4 py-3 text-center cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Phân Loại Thuế TNCN (Chịu thuế / Miễn thuế)"
+                >
+                  <div className="flex items-center justify-center gap-1.5">
+                    <span>Phân Loại Thuế TNCN</span>
+                    {sortField === 'taxClassification' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => handleToggleSort('month')}
+                  className="px-4 py-3 font-mono cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                  title="Nhấn để sắp xếp theo Tháng Áp Dụng"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Tháng Áp Dụng</span>
+                    {sortField === 'month' ? (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-300 opacity-70" />
+                    )}
+                  </div>
+                </th>
                 <th className="px-4 py-3">Ghi Chú</th>
                 <th className="px-4 py-3 text-right">Thao Tác</th>
               </tr>
@@ -472,9 +668,10 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
         <PrintAllowancesModal
           isOpen={isPrintModalOpen}
           onClose={() => setIsPrintModalOpen(false)}
-          specialAllowances={filteredAllowances.length ? filteredAllowances : specialAllowances}
+          specialAllowances={specialAllowances}
           employees={employees}
           settings={settings}
+          initialMonth={filterMonth !== 'all' ? filterMonth : undefined}
         />
       )}
     </div>

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Printer, X, Award, Download } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Printer, X, Award, Download, Calendar, Filter } from 'lucide-react';
 import { Employee, SpecialAllowance, SystemSettings } from '../types';
 import { formatVND } from '../utils/payrollCalculator';
 import * as XLSX from 'xlsx';
@@ -10,6 +11,7 @@ interface PrintAllowancesModalProps {
   specialAllowances: SpecialAllowance[];
   employees: Employee[];
   settings: SystemSettings;
+  initialMonth?: string;
 }
 
 export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
@@ -18,16 +20,42 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
   specialAllowances,
   employees,
   settings,
+  initialMonth
 }) => {
+  const currentMonthStr = String(settings.currentYear) + "-" + String(settings.currentMonth).padStart(2, "0");
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => initialMonth || currentMonthStr);
+
   if (!isOpen) return null;
 
   const empMap = new Map(employees.map(e => [e.id, e]));
   const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
   const posMap = new Map(settings.positions.map(p => [p.id, p.name]));
 
-  const totalAmount = specialAllowances.reduce((sum, a) => sum + (a.amount || 0), 0);
-  const taxableAmount = specialAllowances.filter(a => a.isTaxable).reduce((sum, a) => sum + (a.amount || 0), 0);
-  const exemptAmount = specialAllowances.filter(a => !a.isTaxable).reduce((sum, a) => sum + (a.amount || 0), 0);
+  // Danh sách các tháng có dữ liệu phụ cấp
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    if (currentMonthStr) set.add(currentMonthStr);
+    specialAllowances.forEach(a => {
+      if (a.month) set.add(a.month);
+    });
+    return Array.from(set).sort().reverse();
+  }, [specialAllowances, currentMonthStr]);
+
+  // Lọc phụ cấp theo từng tháng được chọn để in
+  const displayedAllowances = useMemo(() => {
+    if (selectedMonth === 'all') return specialAllowances;
+    return specialAllowances.filter(a => a.month === selectedMonth);
+  }, [specialAllowances, selectedMonth]);
+
+  const totalAmount = displayedAllowances.reduce((sum, a) => sum + (a.amount || 0), 0);
+  const taxableAmount = displayedAllowances.filter(a => a.isTaxable).reduce((sum, a) => sum + (a.amount || 0), 0);
+  const exemptAmount = displayedAllowances.filter(a => !a.isTaxable).reduce((sum, a) => sum + (a.amount || 0), 0);
+
+  const getMonthLabel = (m: string) => {
+    if (m === 'all') return 'Tất cả các tháng';
+    const parts = m.split('-');
+    return 'Tháng ' + parts[1] + '/' + parts[0];
+  };
 
   const handlePrint = () => {
     window.print();
@@ -40,7 +68,7 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
       [`Mã số thuế: ${settings.taxCode} | Điện thoại: ${settings.phoneNumber}`],
       [],
       [`BẢNG TỔNG HỢP CÁC KHOẢN PHỤ CẤP ĐẶC THÙ & HỖ TRỢ`],
-      [`Tháng ${settings.currentMonth} năm ${settings.currentYear}`],
+      [`Kỳ áp dụng: ${getMonthLabel(selectedMonth)}`],
       [],
       [
         'STT',
@@ -54,7 +82,7 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
         'Số Tiền (VNĐ)',
         'Ghi Chú / Quyết Định'
       ],
-      ...specialAllowances.map((a, idx) => {
+      ...displayedAllowances.map((a, idx) => {
         const emp = empMap.get(a.employeeId);
         return [
           idx + 1,
@@ -102,7 +130,7 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
     const ws = XLSX.utils.aoa_to_sheet(excelRows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Phu_Cap');
-    XLSX.writeFile(wb, `Danh_Sach_Phu_Cap_T${settings.currentMonth}_${settings.currentYear}.xlsx`);
+    XLSX.writeFile(wb, `Danh_Sach_Phu_Cap_${selectedMonth === 'all' ? 'Tat_Ca_Cac_Thang' : selectedMonth}.xlsx`);
   };
 
   return (
@@ -110,13 +138,33 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[98vw] max-h-[96vh] flex flex-col overflow-hidden">
         {/* Top Control Bar */}
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between print:hidden shrink-0">
-          <div className="flex items-center gap-2.5">
-            <Award className="w-5 h-5 text-emerald-400" />
-            <div>
-              <h3 className="font-bold text-base">In Danh Sách Phụ Cấp Đặc Thù</h3>
-              <p className="text-xs text-slate-400">
-                Khổ giấy A4 Ngang (Landscape) • {specialAllowances.length} khoản phụ cấp • Kỳ tháng {settings.currentMonth}/{settings.currentYear}
-              </p>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2.5">
+              <Award className="w-5 h-5 text-emerald-400 shrink-0" />
+              <div>
+                <h3 className="font-bold text-base">In Danh Sách Phụ Cấp Đặc Thù</h3>
+                <p className="text-xs text-slate-400">
+                  Khổ giấy A4 Ngang (Landscape) • {displayedAllowances.length} khoản phụ cấp • {getMonthLabel(selectedMonth)}
+                </p>
+              </div>
+            </div>
+
+            {/* Bộ chọn tháng in phụ cấp */}
+            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl">
+              <Calendar className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-xs font-semibold text-slate-300">In theo tháng:</span>
+              <select
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(e.target.value)}
+                className="bg-slate-900 border border-slate-600 rounded-lg text-xs font-bold text-emerald-300 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer"
+              >
+                <option value="all">Tất cả các tháng ({specialAllowances.length} khoản)</option>
+                {availableMonths.map(m => (
+                  <option key={m} value={m}>
+                    {getMonthLabel(m)} ({specialAllowances.filter(a => a.month === m).length} khoản)
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -181,10 +229,10 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
               </div>
               <div className="text-right">
                 <div className="text-xs font-semibold text-slate-800">
-                  Kỳ chi trả: Tháng {settings.currentMonth}/{settings.currentYear}
+                  Kỳ chi trả: {getMonthLabel(selectedMonth)}
                 </div>
                 <div className="text-[10px] text-emerald-800 font-bold mt-0.5">
-                  Tổng số mục phụ cấp: {specialAllowances.length}
+                  Tổng số mục phụ cấp: {displayedAllowances.length}
                 </div>
               </div>
             </div>
@@ -234,7 +282,7 @@ export const PrintAllowancesModal: React.FC<PrintAllowancesModalProps> = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {specialAllowances.map((item, idx) => {
+                  {displayedAllowances.map((item, idx) => {
                     const emp = empMap.get(item.employeeId);
                     return (
                       <tr key={item.id} className="hover:bg-slate-50">
