@@ -64,6 +64,41 @@ function PayrollAppContent() {
   const { currentUser, isAuthenticated, currentUserRole, logout } = useAuthRole();
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('payroll_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleSidebarCollapse = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('payroll_sidebar_collapsed', String(next));
+      } catch (e) {
+        console.warn('Lỗi lưu trạng thái sidebar:', e);
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        const target = e.target as HTMLElement;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+          return;
+        }
+        e.preventDefault();
+        handleToggleSidebarCollapse();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
@@ -727,6 +762,8 @@ function PayrollAppContent() {
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onRequestLogout={() => setIsLogoutConfirmOpen(true)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={handleToggleSidebarCollapse}
       />
 
       {/* Main Content Area */}
@@ -736,6 +773,8 @@ function PayrollAppContent() {
           syncState={syncState}
           onOpenSync={() => setIsSyncModalOpen(true)}
           onToggleSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebarCollapse={handleToggleSidebarCollapse}
           employees={employees}
           onMonthChange={handleMonthChange}
           onOpenUserManagement={() => setActiveTab('users')}
@@ -744,7 +783,7 @@ function PayrollAppContent() {
           onRequestLogout={() => setIsLogoutConfirmOpen(true)}
         />
 
-        <main className="flex-1 p-4 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
+        <main className="flex-1 w-full min-w-0 px-3 sm:px-4 lg:px-6 py-4 space-y-5">
           {activeTab === 'dashboard' && (
             <DashboardView
               employees={employees}

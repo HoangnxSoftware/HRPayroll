@@ -12,7 +12,9 @@ import {
   FileSpreadsheet,
   LogIn,
   Lock,
-  AlertTriangle
+  AlertTriangle,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { SystemSettings, GoogleSyncState, UserRole, Employee } from '../types';
 import { useAuthRole } from '../context/AuthRoleContext';
@@ -24,6 +26,8 @@ interface NavbarProps {
   syncState: GoogleSyncState;
   onOpenSync: () => void;
   onToggleSidebar: () => void;
+  isSidebarCollapsed?: boolean;
+  onToggleSidebarCollapse?: () => void;
   employees: Employee[];
   onMonthChange: (month: number, year: number) => void;
   onOpenUserManagement: () => void;
@@ -37,6 +41,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   syncState,
   onOpenSync,
   onToggleSidebar,
+  isSidebarCollapsed = false,
+  onToggleSidebarCollapse,
   employees,
   onMonthChange,
   onOpenUserManagement,
@@ -55,30 +61,51 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-2xs">
-      <div className="px-4 lg:px-8 py-3 flex items-center justify-between gap-4">
-        {/* Left: Mobile Toggle & Brand Unit */}
-        <div className="flex items-center gap-3">
+      <div className="px-3 sm:px-4 lg:px-6 py-2.5 flex items-center justify-between gap-3 sm:gap-4">
+        {/* Left: Mobile Toggle, Desktop Toggle & Brand Unit */}
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             onClick={onToggleSidebar}
-            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl lg:hidden cursor-pointer"
+            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl lg:hidden cursor-pointer shrink-0"
+            title="Mở menu"
           >
             <Menu className="w-5 h-5" />
           </button>
 
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-xs">
-              <Building2 className="w-5 h-5" />
+          {onToggleSidebarCollapse && (
+            <button
+              onClick={onToggleSidebarCollapse}
+              title={isSidebarCollapsed ? "Mở rộng thanh menu (Ctrl+B)" : "Thu gọn menu để mở rộng tối đa không gian làm việc (Ctrl+B)"}
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 rounded-xl cursor-pointer transition-colors shrink-0"
+            >
+              {isSidebarCollapsed ? (
+                <>
+                  <PanelLeftOpen className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-semibold text-[11px] text-slate-700">Mở rộng menu</span>
+                </>
+              ) : (
+                <>
+                  <PanelLeftClose className="w-4 h-4 text-slate-500 shrink-0" />
+                  <span className="font-semibold text-[11px] text-slate-600">Thu gọn</span>
+                </>
+              )}
+            </button>
+          )}
+
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-xs shrink-0">
+              <Building2 className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h1 className="font-extrabold text-slate-900 text-sm sm:text-base leading-tight">
+                <h1 className="font-extrabold text-slate-900 text-sm sm:text-base leading-tight truncate">
                   {settings.companyName}
                 </h1>
-                <span className="hidden sm:inline-block px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">
+                <span className="hidden sm:inline-block px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full shrink-0">
                   MST: {settings.taxCode}
                 </span>
               </div>
-              <div className="text-[11px] text-slate-500 hidden sm:block">
+              <div className="text-[11px] text-slate-500 hidden md:block truncate">
                 Phần mềm Quản lý Tiền lương & Nhân sự Doanh nghiệp
               </div>
             </div>
