@@ -13,7 +13,11 @@ import {
   Layers,
   ChevronRight,
   Info,
-  AlertTriangle
+  AlertTriangle,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Save
 } from 'lucide-react';
 import { 
   Employee, 
@@ -35,6 +39,8 @@ import { exportAnnualPayrollToExcel } from '../utils/excelHelper';
 import { PrintAnnualPayrollModal, AnnualEmployeeData } from '../components/PrintAnnualPayrollModal';
 import { useAuthRole } from '../context/AuthRoleContext';
 
+type AnnualSortField = 'default_employee_order' | 'employeeCode' | 'fullName' | 'department' | 'totalNetYear';
+
 interface AnnualPayrollViewProps {
   employees: Employee[];
   timekeepings: TimekeepingRecord[];
@@ -43,6 +49,7 @@ interface AnnualPayrollViewProps {
   specialAllowances: SpecialAllowance[];
   dependents: Dependent[];
   settings: SystemSettings;
+  onReorderEmployees?: (newEmployees: Employee[]) => void;
 }
 
 export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
@@ -53,13 +60,25 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
   specialAllowances,
   dependents,
   settings,
+  onReorderEmployees
 }) => {
-  const { canExportData } = useAuthRole();
+  const { canExportData, canEditEmployees } = useAuthRole();
   const [selectedYear, setSelectedYear] = useState<number>(settings.currentYear || 2026);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
+  const [sortField, setSortField] = useState<AnnualSortField>('default_employee_order');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<'monthly_net' | 'yearly_breakdown'>('monthly_net');
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
+  // Bản đồ chỉ số vị trí người lao động chuẩn tại Danh sách người lao động
+  const empOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    (employees || []).forEach((emp, index) => {
+      map.set(emp.id, index);
+    });
+    return map;
+  }, [employees]);
 
   const depMap = new Map(settings.departments.map(d => [d.id, d.name]));
   const posMap = new Map(settings.positions.map(p => [p.id, p.name]));
@@ -182,18 +201,67 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
     });
   }, [annualData, searchTerm, filterDepartment]);
 
+  // Sắp xếp báo cáo lương cả năm: Mặc định theo đúng vị trí của người lao động trong Danh sách người lao động
+  const sortedAnnualData = useMemo(() => {
+    return [...filteredData].sort((a, b) => {
+      if (sortField === 'default_employee_order') {
+        const orderA = empOrderMap.get(a.employee.id) ?? 999999;
+        const orderB = empOrderMap.get(b.employee.id) ?? 999999;
+        return orderA - orderB;
+      }
+      let cmp = 0;
+      if (sortField === 'employeeCode') {
+        cmp = a.employee.employeeCode.localeCompare(b.employee.employeeCode, 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = a.employee.fullName.localeCompare(b.employee.fullName, 'vi');
+      } else if (sortField === 'department') {
+        cmp = (a.departmentName || '').localeCompare(b.departmentName || '', 'vi');
+      } else if (sortField === 'totalNetYear') {
+        cmp = a.totalNetYear - b.totalNetYear;
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [filteredData, sortField, sortDirection, empOrderMap]);
+
+  // Thay đổi vị trí người lao động đồng bộ sang Danh sách người lao động
+  const handleMoveEmployee = (empId: string, direction: 'up' | 'down') => {
+    const currentIndex = employees.findIndex(e => e.id === empId);
+    if (currentIndex === -1) return;
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= employees.length) return;
+
+    const newEmployees = [...employees];
+    const [moved] = newEmployees.splice(currentIndex, 1);
+    newEmployees.splice(targetIndex, 0, moved);
+
+    setSortField('default_employee_order');
+    onReorderEmployees?.(newEmployees);
+  };
+
+  const handleSaveCurrentSortAsDefault = () => {
+    if (!onReorderEmployees) return;
+    const sortedIds = sortedAnnualData.map(d => d.employee.id);
+    const remaining = employees.filter(e => !sortedIds.includes(e.id));
+    const newEmployees = [
+      ...sortedIds.map(id => employees.find(e => e.id === id)!).filter(Boolean),
+      ...remaining
+    ];
+    onReorderEmployees(newEmployees);
+    setSortField('default_employee_order');
+  };
+
   // Tổng hợp KPIs cả năm
   const summaryKPIs = useMemo(() => {
-    const totalGross = filteredData.reduce((s, d) => s + d.totalGrossYear, 0);
-    const totalNet = filteredData.reduce((s, d) => s + d.totalNetYear, 0);
-    const totalTax = filteredData.reduce((s, d) => s + d.totalTaxYear, 0);
-    const totalInsurance = filteredData.reduce((s, d) => s + d.totalInsuranceEmpYear, 0);
-    const totalOt = filteredData.reduce((s, d) => s + d.totalOtYear, 0);
-    const avgPerPerson = filteredData.length > 0 ? (totalNet / filteredData.length / 12) : 0;
+    const totalGross = sortedAnnualData.reduce((s, d) => s + d.totalGrossYear, 0);
+    const totalNet = sortedAnnualData.reduce((s, d) => s + d.totalNetYear, 0);
+    const totalTax = sortedAnnualData.reduce((s, d) => s + d.totalTaxYear, 0);
+    const totalInsurance = sortedAnnualData.reduce((s, d) => s + d.totalInsuranceEmpYear, 0);
+    const totalOt = sortedAnnualData.reduce((s, d) => s + d.totalOtYear, 0);
+    const avgPerPerson = sortedAnnualData.length > 0 ? (totalNet / sortedAnnualData.length / 12) : 0;
 
     const monthlyTotals: { [month: number]: number } = {};
     for (let m = 1; m <= 12; m++) {
-      monthlyTotals[m] = filteredData.reduce((s, d) => s + (d.monthlyNet[m] || 0), 0);
+      monthlyTotals[m] = sortedAnnualData.reduce((s, d) => s + (d.monthlyNet[m] || 0), 0);
     }
 
     return {
@@ -205,11 +273,11 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
       avgPerPerson,
       monthlyTotals
     };
-  }, [filteredData]);
+  }, [sortedAnnualData]);
 
   // Handler: Xuất Excel
   const handleExportExcel = () => {
-    exportAnnualPayrollToExcel(filteredData, selectedYear, settings.companyName);
+    exportAnnualPayrollToExcel(sortedAnnualData, selectedYear, settings.companyName);
   };
 
   return (
@@ -366,6 +434,22 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
               ))}
             </select>
           </div>
+
+          {/* Sắp xếp vị trí */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+            <select
+              value={sortField}
+              onChange={e => setSortField(e.target.value as AnnualSortField)}
+              className="bg-emerald-50/60 border border-emerald-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-emerald-950 focus:outline-none"
+            >
+              <option value="default_employee_order">Thứ tự: Theo Danh sách người lao động</option>
+              <option value="employeeCode">Sắp xếp theo Mã nhân viên</option>
+              <option value="fullName">Sắp xếp theo Họ và tên</option>
+              <option value="department">Sắp xếp theo Phòng ban</option>
+              <option value="totalNetYear">Sắp xếp theo Tổng thực lĩnh cả năm</option>
+            </select>
+          </div>
         </div>
 
         {/* View mode toggle */}
@@ -393,6 +477,39 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
         </div>
       </div>
 
+      {/* Banner Lưu thứ tự sắp xếp sang Danh sách người lao động */}
+      {sortField !== 'default_employee_order' && canEditEmployees && onReorderEmployees && (
+        <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-blue-900 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="w-4 h-4 text-blue-600 shrink-0" />
+            <span>
+              Đang xem báo cáo lương năm sắp xếp theo: <strong>{
+                sortField === 'employeeCode' ? 'Mã nhân viên' :
+                sortField === 'fullName' ? 'Họ và tên' :
+                sortField === 'department' ? 'Phòng ban' : 'Tổng thực lĩnh cả năm'
+              }</strong>.
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSaveCurrentSortAsDefault}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Lưu thứ tự này làm vị trí mặc định cho Danh sách NV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortField('default_employee_order')}
+              className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold rounded-lg transition-colors cursor-pointer"
+            >
+              Đặt lại theo Danh sách NV
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Data Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
@@ -402,7 +519,7 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
               <thead>
                 <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-700 font-bold">
                   <th className="py-3 px-3 w-10 text-center">STT</th>
-                  <th className="py-3 px-3 min-w-[85px]">Mã NV</th>
+                  <th className="py-3 px-3 min-w-[105px]">Mã NV / Vị Trí</th>
                   <th className="py-3 px-3 min-w-[105px]">Số CCCD</th>
                   <th className="py-3 px-3 min-w-[140px]">Họ và Tên</th>
                   <th className="py-3 px-3 min-w-[100px]">Phòng Ban</th>
@@ -421,14 +538,40 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredData.map((row, idx) => {
+                {sortedAnnualData.map((row, idx) => {
                   const statusInfo = getEmployeeWorkStatusDetails(row.employee);
                   const isDuplicateCccd = row.employee.idCardNumber ? duplicateIdCards.has(row.employee.idCardNumber.trim()) : false;
 
                   return (
                     <tr key={row.employee.id} className="hover:bg-slate-50 transition-colors">
                       <td className="py-2.5 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
-                      <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{row.employee.employeeCode}</td>
+                      <td className="py-2.5 px-3 font-mono">
+                        <div className="flex items-center gap-1.5">
+                          {canEditEmployees && onReorderEmployees && (
+                            <div className="flex flex-col items-center gap-0.5 mr-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleMoveEmployee(row.employee.id, 'up')}
+                                disabled={idx === 0}
+                                title="Di chuyển lên trên (thay đổi vị trí người lao động)"
+                                className="p-0.5 hover:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-400 hover:text-slate-800 rounded transition-colors cursor-pointer"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveEmployee(row.employee.id, 'down')}
+                                disabled={idx === sortedAnnualData.length - 1}
+                                title="Di chuyển xuống dưới (thay đổi vị trí người lao động)"
+                                className="p-0.5 hover:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-400 hover:text-slate-800 rounded transition-colors cursor-pointer"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                          <span className="font-bold text-slate-800">{row.employee.employeeCode}</span>
+                        </div>
+                      </td>
                       <td className="py-2.5 px-3 font-mono">
                         <div className="font-semibold text-slate-900">{row.employee.idCardNumber || '—'}</div>
                         {isDuplicateCccd && (
@@ -505,7 +648,7 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
               <thead>
                 <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-700 font-bold">
                   <th className="py-3 px-3 w-10 text-center">STT</th>
-                  <th className="py-3 px-3 min-w-[85px]">Mã NV</th>
+                  <th className="py-3 px-3 min-w-[105px]">Mã NV / Vị Trí</th>
                   <th className="py-3 px-3 min-w-[105px]">Số CCCD</th>
                   <th className="py-3 px-3 min-w-[140px]">Họ và Tên</th>
                   <th className="py-3 px-3 min-w-[100px]">Phòng Ban</th>
@@ -522,14 +665,40 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredData.map((row, idx) => {
+                {sortedAnnualData.map((row, idx) => {
                   const statusInfo = getEmployeeWorkStatusDetails(row.employee);
                   const isDuplicateCccd = row.employee.idCardNumber ? duplicateIdCards.has(row.employee.idCardNumber.trim()) : false;
 
                   return (
                     <tr key={row.employee.id} className="hover:bg-slate-50 transition-colors">
                       <td className="py-2.5 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
-                      <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{row.employee.employeeCode}</td>
+                      <td className="py-2.5 px-3 font-mono">
+                        <div className="flex items-center gap-1.5">
+                          {canEditEmployees && onReorderEmployees && (
+                            <div className="flex flex-col items-center gap-0.5 mr-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleMoveEmployee(row.employee.id, 'up')}
+                                disabled={idx === 0}
+                                title="Di chuyển lên trên (thay đổi vị trí người lao động)"
+                                className="p-0.5 hover:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-400 hover:text-slate-800 rounded transition-colors cursor-pointer"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveEmployee(row.employee.id, 'down')}
+                                disabled={idx === sortedAnnualData.length - 1}
+                                title="Di chuyển xuống dưới (thay đổi vị trí người lao động)"
+                                className="p-0.5 hover:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-400 hover:text-slate-800 rounded transition-colors cursor-pointer"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                          <span className="font-bold text-slate-800">{row.employee.employeeCode}</span>
+                        </div>
+                      </td>
                       <td className="py-2.5 px-3 font-mono">
                         <div className="font-semibold text-slate-900">{row.employee.idCardNumber || '—'}</div>
                         {isDuplicateCccd && (
@@ -585,7 +754,7 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
                     TỔNG CỘNG TOÀN CÔNG TY
                   </td>
                   <td className="py-3 px-3 text-right font-mono font-bold">
-                    {formatVND(filteredData.reduce((s, d) => s + d.totalBaseSalaryYear, 0))}
+                    {formatVND(sortedAnnualData.reduce((s, d) => s + d.totalBaseSalaryYear, 0))}
                   </td>
                   <td className="py-3 px-3 text-right font-mono font-black">
                     {formatVND(summaryKPIs.totalGross)}
@@ -629,7 +798,7 @@ export const AnnualPayrollView: React.FC<AnnualPayrollViewProps> = ({
       <PrintAnnualPayrollModal
         isOpen={isPrintModalOpen}
         onClose={() => setIsPrintModalOpen(false)}
-        annualData={filteredData}
+        annualData={sortedAnnualData}
         year={selectedYear}
         settings={settings}
       />

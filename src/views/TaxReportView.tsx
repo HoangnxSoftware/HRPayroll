@@ -21,7 +21,11 @@ import {
   FileSpreadsheet,
   Pencil,
   X,
-  HeartHandshake
+  HeartHandshake,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Save
 } from 'lucide-react';
 import { 
   PayrollRecord, 
@@ -54,6 +58,8 @@ import { PrintTaxBreakdownModal } from '../components/PrintTaxBreakdownModal';
 import { EditTaxBracketsModal } from '../components/EditTaxBracketsModal';
 import { EditTaxExemptionModal } from '../components/EditTaxExemptionModal';
 
+type TaxSortField = 'default_employee_order' | 'employeeCode' | 'fullName' | 'department' | 'tax';
+
 interface TaxReportViewProps {
   payrolls: PayrollRecord[];
   employees: Employee[];
@@ -64,6 +70,7 @@ interface TaxReportViewProps {
   specialAllowances?: SpecialAllowance[];
   dependents?: Dependent[];
   onUpdateSettings?: (settings: SystemSettings) => void;
+  onReorderEmployees?: (newEmployees: Employee[]) => void;
 }
 
 export const TaxReportView: React.FC<TaxReportViewProps> = ({
@@ -75,13 +82,25 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
   mealRegistrations = [],
   specialAllowances = [],
   dependents = [],
-  onUpdateSettings
+  onUpdateSettings,
+  onReorderEmployees
 }) => {
   const { canExportData, canEditSettings } = useAuthRole();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('all');
   const [taxFilter, setTaxFilter] = useState<'all' | 'tax_only' | 'no_tax'>('all');
   const [annualDifferenceFilter, setAnnualDifferenceFilter] = useState<'all' | 'overpaid' | 'underpaid' | 'matched'>('all');
+  const [sortField, setSortField] = useState<TaxSortField>('default_employee_order');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // Bản đồ chỉ số vị trí người lao động chuẩn tại Danh sách người lao động
+  const empOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    (employees || []).forEach((emp, index) => {
+      map.set(emp.id, index);
+    });
+    return map;
+  }, [employees]);
   
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<'summary' | 'annual_tax' | 'taxable_breakdown' | 'withholding_settings'>('summary');
@@ -130,7 +149,7 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
   const currentMonthKey = `${settings.currentYear}-${String(settings.currentMonth).padStart(2, '0')}`;
 
   // Filtered payrolls for monthly summary
-  const filteredPayrolls = useMemo(() => {
+  const baseFilteredPayrolls = useMemo(() => {
     return payrolls.filter(p => {
       const emp = empMap.get(p.employeeId);
       if (!emp) return false;
@@ -158,8 +177,33 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
     });
   }, [payrolls, empMap, selectedDepartment, taxFilter, searchTerm]);
 
+  const sortedFilteredPayrolls = useMemo(() => {
+    return [...baseFilteredPayrolls].sort((a, b) => {
+      if (sortField === 'default_employee_order') {
+        const orderA = empOrderMap.get(a.employeeId) ?? 999999;
+        const orderB = empOrderMap.get(b.employeeId) ?? 999999;
+        return orderA - orderB;
+      }
+      const empA = empMap.get(a.employeeId);
+      const empB = empMap.get(b.employeeId);
+      let cmp = 0;
+      if (sortField === 'employeeCode') {
+        cmp = (empA?.employeeCode || '').localeCompare(empB?.employeeCode || '', 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = (empA?.fullName || '').localeCompare(empB?.fullName || '', 'vi');
+      } else if (sortField === 'department') {
+        cmp = (depMap.get(empA?.departmentId || '') || '').localeCompare(depMap.get(empB?.departmentId || '') || '', 'vi');
+      } else if (sortField === 'tax') {
+        cmp = a.personalIncomeTax - b.personalIncomeTax;
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [baseFilteredPayrolls, sortField, sortDirection, empOrderMap, empMap, depMap]);
+
+  const filteredPayrolls = sortedFilteredPayrolls;
+
   // Payrolls for Taxable & Exempt Income Breakdown tab for selected month & year (Từng tháng)
-  const breakdownPayrolls = useMemo(() => {
+  const baseBreakdownPayrolls = useMemo(() => {
     if (breakdownSelectedMonth === settings.currentMonth && breakdownSelectedYear === settings.currentYear) {
       return filteredPayrolls;
     }
@@ -193,6 +237,31 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
       return true;
     });
   }, [breakdownSelectedMonth, breakdownSelectedYear, settings, filteredPayrolls, employees, timekeepings, insurances, mealRegistrations, specialAllowances, dependents, empMap, selectedDepartment, taxFilter, searchTerm]);
+
+  const sortedBreakdownPayrolls = useMemo(() => {
+    return [...baseBreakdownPayrolls].sort((a, b) => {
+      if (sortField === 'default_employee_order') {
+        const orderA = empOrderMap.get(a.employeeId) ?? 999999;
+        const orderB = empOrderMap.get(b.employeeId) ?? 999999;
+        return orderA - orderB;
+      }
+      const empA = empMap.get(a.employeeId);
+      const empB = empMap.get(b.employeeId);
+      let cmp = 0;
+      if (sortField === 'employeeCode') {
+        cmp = (empA?.employeeCode || '').localeCompare(empB?.employeeCode || '', 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = (empA?.fullName || '').localeCompare(empB?.fullName || '', 'vi');
+      } else if (sortField === 'department') {
+        cmp = (depMap.get(empA?.departmentId || '') || '').localeCompare(depMap.get(empB?.departmentId || '') || '', 'vi');
+      } else if (sortField === 'tax') {
+        cmp = a.personalIncomeTax - b.personalIncomeTax;
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [baseBreakdownPayrolls, sortField, sortDirection, empOrderMap, empMap, depMap]);
+
+  const breakdownPayrolls = sortedBreakdownPayrolls;
 
   // Grand Totals for current month
   const totalGross = useMemo(() => payrolls.reduce((s, p) => s + p.grossIncome, 0), [payrolls]);
@@ -234,7 +303,7 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
   }, [employees, timekeepings, insurances, mealRegistrations, specialAllowances, dependents, settings, annualTargetYear]);
 
   // Filtered annual records
-  const filteredAnnualRecords = useMemo(() => {
+  const baseFilteredAnnualRecords = useMemo(() => {
     return annualTaxRecords.filter(r => {
       // Department filter (check if employee is in department)
       if (selectedDepartment !== 'all') {
@@ -261,6 +330,59 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
       return true;
     });
   }, [annualTaxRecords, selectedDepartment, annualDifferenceFilter, searchTerm, employees]);
+
+  const sortedFilteredAnnualRecords = useMemo(() => {
+    return [...baseFilteredAnnualRecords].sort((a, b) => {
+      if (sortField === 'default_employee_order') {
+        const minOrderA = Math.min(...(a.employeeIds.map(id => empOrderMap.get(id) ?? 999999)));
+        const minOrderB = Math.min(...(b.employeeIds.map(id => empOrderMap.get(id) ?? 999999)));
+        return minOrderA - minOrderB;
+      }
+      let cmp = 0;
+      if (sortField === 'employeeCode') {
+        cmp = (a.employeeCodes[0] || '').localeCompare(b.employeeCodes[0] || '', 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = a.fullName.localeCompare(b.fullName, 'vi');
+      } else if (sortField === 'department') {
+        cmp = (a.departmentNames[0] || '').localeCompare(b.departmentNames[0] || '', 'vi');
+      } else if (sortField === 'tax') {
+        cmp = a.annualPayableTax - b.annualPayableTax;
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [baseFilteredAnnualRecords, sortField, sortDirection, empOrderMap]);
+
+  const filteredAnnualRecords = sortedFilteredAnnualRecords;
+
+  const handleMoveEmployee = (empId: string, direction: 'up' | 'down') => {
+    const currentIndex = employees.findIndex(e => e.id === empId);
+    if (currentIndex === -1) return;
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= employees.length) return;
+    const newEmployees = [...employees];
+    const [moved] = newEmployees.splice(currentIndex, 1);
+    newEmployees.splice(targetIndex, 0, moved);
+    setSortField('default_employee_order');
+    onReorderEmployees?.(newEmployees);
+  };
+
+  const handleSaveCurrentSortAsDefault = () => {
+    if (!onReorderEmployees) return;
+    let sortedEmpIds: string[] = [];
+    if (activeTab === 'annual_tax') {
+      sortedEmpIds = filteredAnnualRecords.flatMap(r => r.employeeIds);
+    } else {
+      sortedEmpIds = filteredPayrolls.map(p => p.employeeId);
+    }
+    const uniqueSortedIds = Array.from(new Set(sortedEmpIds));
+    const remaining = employees.filter(e => !uniqueSortedIds.includes(e.id));
+    const newEmployees = [
+      ...uniqueSortedIds.map(id => employees.find(e => e.id === id)!).filter(Boolean),
+      ...remaining
+    ];
+    onReorderEmployees(newEmployees);
+    setSortField('default_employee_order');
+  };
 
   // Annual grand totals
   const annualGrandTotals = useMemo(() => {
@@ -350,7 +472,7 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
   };
 
   const handleExportMonthlyExcel = () => {
-    exportTaxReportToExcel(payrolls, employees, settings, `${settings.currentMonth}_${settings.currentYear}`);
+    exportTaxReportToExcel(filteredPayrolls, employees, settings, `${settings.currentMonth}_${settings.currentYear}`);
   };
 
   const handleExportAnnualExcel = () => {
@@ -746,8 +868,62 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
               </div>
             </div>
           ) : null}
+
+          {/* Sắp xếp thứ tự người lao động */}
+          <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-xl border border-slate-200">
+            <span className="font-bold text-slate-600 text-[11px]">Thứ tự:</span>
+            <select
+              value={sortField}
+              onChange={e => setSortField(e.target.value as TaxSortField)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer pr-1 text-xs"
+              title="Thứ tự hiển thị người lao động trong báo cáo thuế TNCN"
+            >
+              <option value="default_employee_order">Theo Danh sách NLĐ (Mặc định)</option>
+              <option value="employeeCode">Theo Mã nhân viên</option>
+              <option value="fullName">Theo Họ và tên</option>
+              <option value="department">Theo Phòng ban</option>
+              <option value="tax">Theo Số tiền thuế TNCN</option>
+            </select>
+            {sortField !== 'default_employee_order' && (
+              <button
+                onClick={() => setSortDirection(d => d === 'asc' ? 'desc' : 'asc')}
+                className="p-1 border border-slate-300 rounded hover:bg-slate-200 text-slate-600 shrink-0 cursor-pointer"
+                title={`Đổi hướng sắp xếp (${sortDirection === 'asc' ? 'Tăng dần' : 'Giảm dần'})`}
+              >
+                <ArrowUpDown className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Banner lưu thứ tự khi khác mặc định */}
+      {sortField !== 'default_employee_order' && onReorderEmployees && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="w-4 h-4 text-blue-600 shrink-0" />
+            <span>
+              Đang sắp xếp tạm thời theo <strong>{sortField === 'employeeCode' ? 'Mã NV' : sortField === 'fullName' ? 'Họ tên' : sortField === 'department' ? 'Phòng ban' : 'Tiền thuế'}</strong> ({sortDirection === 'asc' ? 'A→Z / Thấp→Cao' : 'Z→A / Cao→Thấp'}). Bạn có muốn lưu thứ tự này làm thứ tự chuẩn cho <strong>Danh sách người lao động</strong> không?
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+            <button
+              onClick={handleSaveCurrentSortAsDefault}
+              className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors shadow-2xs cursor-pointer"
+              title="Lưu thứ tự này làm thứ tự mặc định của Danh sách người lao động"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Lưu thứ tự này</span>
+            </button>
+            <button
+              onClick={() => setSortField('default_employee_order')}
+              className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold rounded-lg transition-colors cursor-pointer"
+            >
+              Đặt lại mặc định
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* TAB 1: SUMMARY MONTHLY TAX DECLARATION TABLE (WITH NEW METHOD COLUMN)     */}
@@ -826,7 +1002,31 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                   return (
                     <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-3 py-3 text-slate-400 font-mono text-center">{idx + 1}</td>
-                      <td className="px-3 py-3 font-mono font-bold text-slate-900">{emp?.employeeCode}</td>
+                      <td className="px-3 py-3 font-mono font-bold text-slate-900">
+                        <div className="flex items-center gap-1.5 justify-between">
+                          <span>{emp?.employeeCode}</span>
+                          {onReorderEmployees && (
+                            <div className="flex flex-col gap-0.5 opacity-60 hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => handleMoveEmployee(p.employeeId, 'up')}
+                                disabled={idx === 0}
+                                title="Di chuyển lên trên (cập nhật vị trí trong Danh sách NLĐ)"
+                                className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => handleMoveEmployee(p.employeeId, 'down')}
+                                disabled={idx === filteredPayrolls.length - 1}
+                                title="Di chuyển xuống dưới (cập nhật vị trí trong Danh sách NLĐ)"
+                                className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-3 py-3 font-bold text-slate-800 whitespace-nowrap">{emp?.fullName}</td>
                       <td className="px-3 py-3 text-slate-600 whitespace-nowrap">{depMap.get(emp?.departmentId || '')}</td>
                       <td className="px-3 py-3 font-mono text-slate-800 font-semibold">{emp?.idCardNumber || emp?.taxId || '-'}</td>
@@ -1100,13 +1300,37 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
 
                       {/* Mã NV (nếu trùng CCCD hiển thị các mã NV gộp) */}
                       <td className="px-3 py-3 font-sans">
-                        <div className="font-bold text-slate-900">{r.employeeCodes.join(', ')}</div>
-                        {r.hasMultipleCodes && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-100 text-red-800 border border-red-300 font-extrabold text-[9px] mt-0.5">
-                            <AlertTriangle className="w-2.5 h-2.5" />
-                            Gộp {r.employeeCodes.length} mã NV
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1.5 justify-between">
+                          <div>
+                            <div className="font-bold text-slate-900">{r.employeeCodes.join(', ')}</div>
+                            {r.hasMultipleCodes && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-100 text-red-800 border border-red-300 font-extrabold text-[9px] mt-0.5">
+                                <AlertTriangle className="w-2.5 h-2.5" />
+                                Gộp {r.employeeCodes.length} mã NV
+                              </span>
+                            )}
+                          </div>
+                          {onReorderEmployees && r.employeeIds.length > 0 && (
+                            <div className="flex flex-col gap-0.5 opacity-60 hover:opacity-100 transition-opacity shrink-0">
+                              <button
+                                onClick={() => handleMoveEmployee(r.employeeIds[0], 'up')}
+                                disabled={idx === 0}
+                                title="Di chuyển lên trên (cập nhật vị trí trong Danh sách NLĐ)"
+                                className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => handleMoveEmployee(r.employeeIds[0], 'down')}
+                                disabled={idx === filteredAnnualRecords.length - 1}
+                                title="Di chuyển xuống dưới (cập nhật vị trí trong Danh sách NLĐ)"
+                                className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </td>
 
                       {/* 12 Cột tháng */}
@@ -1310,7 +1534,31 @@ export const TaxReportView: React.FC<TaxReportViewProps> = ({
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-3 py-3 text-center text-slate-400 font-sans">{idx + 1}</td>
-                      <td className="px-3 py-3 font-bold text-slate-900">{emp?.employeeCode}</td>
+                      <td className="px-3 py-3 font-bold text-slate-900">
+                        <div className="flex items-center gap-1.5 justify-between">
+                          <span>{emp?.employeeCode}</span>
+                          {onReorderEmployees && (
+                            <div className="flex flex-col gap-0.5 opacity-60 hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => handleMoveEmployee(p.employeeId, 'up')}
+                                disabled={idx === 0}
+                                title="Di chuyển lên trên (cập nhật vị trí trong Danh sách NLĐ)"
+                                className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => handleMoveEmployee(p.employeeId, 'down')}
+                                disabled={idx === breakdownPayrolls.length - 1}
+                                title="Di chuyển xuống dưới (cập nhật vị trí trong Danh sách NLĐ)"
+                                className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-3 py-3 font-sans font-bold text-slate-800">{emp?.fullName}</td>
                       
                       <td className="px-3 py-3 text-right bg-amber-50/20">{formatVND(p.mainSalary)}</td>

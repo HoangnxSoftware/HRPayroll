@@ -21,13 +21,19 @@ import {
   CheckSquare,
   Square,
   Calculator,
-  UserCheck
+  UserCheck,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Save
 } from 'lucide-react';
 import { MealRegistration, Employee, SystemSettings, MealType, TimekeepingRecord } from '../types';
 import { formatVND, getAvailableYears } from '../utils/payrollCalculator';
 import * as XLSX from 'xlsx';
 import { useAuthRole } from '../context/AuthRoleContext';
 import { PrintMealModal } from '../components/PrintMealModal';
+
+type MealSortField = 'default_employee_order' | 'employeeCode' | 'fullName' | 'department' | 'mealPlan';
 
 interface MealViewProps {
   mealRegistrations: MealRegistration[];
@@ -36,6 +42,7 @@ interface MealViewProps {
   settings: SystemSettings;
   onUpdateMeal: (updated: MealRegistration) => void;
   onBatchUpdateMeals?: (meals: MealRegistration[]) => void;
+  onReorderEmployees?: (newEmployees: Employee[]) => void;
 }
 
 export const MealView: React.FC<MealViewProps> = ({
@@ -44,7 +51,8 @@ export const MealView: React.FC<MealViewProps> = ({
   timekeepings,
   settings,
   onUpdateMeal,
-  onBatchUpdateMeals
+  onBatchUpdateMeals,
+  onReorderEmployees
 }) => {
   const { canEditEmployees, canExportData } = useAuthRole();
   const currentMonthStr = `${settings.currentYear}-${String(settings.currentMonth).padStart(2, '0')}`;
@@ -53,6 +61,17 @@ export const MealView: React.FC<MealViewProps> = ({
   const [filterMealPlan, setFilterMealPlan] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [sortField, setSortField] = useState<MealSortField>('default_employee_order');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // Bản đồ chỉ số vị trí người lao động chuẩn tại Danh sách người lao động
+  const empOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    (employees || []).forEach((emp, index) => {
+      map.set(emp.id, index);
+    });
+    return map;
+  }, [employees]);
 
   useEffect(() => {
     setSelectedMonth(`${settings.currentYear}-${String(settings.currentMonth).padStart(2, '0')}`);
@@ -262,7 +281,7 @@ export const MealView: React.FC<MealViewProps> = ({
   }, [employees, mealRegistrations, selectedMonth]);
 
   // Lọc danh sách nhân viên theo phòng ban, hình thức đăng ký & tìm kiếm
-  const filteredEmployees = useMemo(() => {
+  const baseFilteredEmployees = useMemo(() => {
     return employees.filter(emp => {
       if (selectedDepartment !== 'all' && emp.departmentId !== selectedDepartment) {
         return false;
@@ -293,6 +312,57 @@ export const MealView: React.FC<MealViewProps> = ({
       return true;
     });
   }, [employees, selectedDepartment, filterMealPlan, searchTerm, depMap, posMap, mealRegistrations, selectedMonth]);
+
+  const sortedFilteredEmployees = useMemo(() => {
+    return [...baseFilteredEmployees].sort((a, b) => {
+      if (sortField === 'default_employee_order') {
+        const orderA = empOrderMap.get(a.id) ?? 999999;
+        const orderB = empOrderMap.get(b.id) ?? 999999;
+        return orderA - orderB;
+      }
+      let cmp = 0;
+      if (sortField === 'employeeCode') {
+        cmp = a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = a.fullName.localeCompare(b.fullName, 'vi');
+      } else if (sortField === 'department') {
+        cmp = (depMap.get(a.departmentId) || '').localeCompare(depMap.get(b.departmentId) || '', 'vi');
+      } else if (sortField === 'mealPlan') {
+        const regA = getEmployeeMealReg(a.id);
+        const regB = getEmployeeMealReg(b.id);
+        const typeA = regA.mealType || regA.planType || '';
+        const typeB = regB.mealType || regB.planType || '';
+        cmp = typeA.localeCompare(typeB);
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [baseFilteredEmployees, sortField, sortDirection, empOrderMap, depMap, mealRegistrations, selectedMonth]);
+
+  const handleMoveEmployee = (empId: string, direction: 'up' | 'down') => {
+    const currentIndex = employees.findIndex(e => e.id === empId);
+    if (currentIndex === -1) return;
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= employees.length) return;
+    const newEmployees = [...employees];
+    const [moved] = newEmployees.splice(currentIndex, 1);
+    newEmployees.splice(targetIndex, 0, moved);
+    setSortField('default_employee_order');
+    onReorderEmployees?.(newEmployees);
+  };
+
+  const handleSaveCurrentSortAsDefault = () => {
+    if (!onReorderEmployees) return;
+    const sortedIds = sortedFilteredEmployees.map(e => e.id);
+    const remaining = employees.filter(e => !sortedIds.includes(e.id));
+    const newEmployees = [
+      ...sortedIds.map(id => employees.find(e => e.id === id)!).filter(Boolean),
+      ...remaining
+    ];
+    onReorderEmployees(newEmployees);
+    setSortField('default_employee_order');
+  };
+
+  const filteredEmployees = sortedFilteredEmployees;
 
   // Toggle selection
   const isAllFilteredSelected = filteredEmployees.length > 0 && filteredEmployees.every(e => selectedEmployeeIds.includes(e.id));
@@ -612,6 +682,32 @@ export const MealView: React.FC<MealViewProps> = ({
               </select>
             </div>
 
+            {/* Thứ tự sắp xếp người lao động */}
+            <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+              <span className="font-semibold text-slate-700">Thứ tự:</span>
+              <select
+                value={sortField}
+                onChange={e => setSortField(e.target.value as MealSortField)}
+                className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer pr-1"
+                title="Thứ tự hiển thị nhân sự trong Đăng ký ăn ca"
+              >
+                <option value="default_employee_order">Theo Danh sách NLĐ (Mặc định)</option>
+                <option value="employeeCode">Theo Mã nhân viên</option>
+                <option value="fullName">Theo Họ và tên</option>
+                <option value="department">Theo Phòng ban</option>
+                <option value="mealPlan">Theo Hình thức ăn ca</option>
+              </select>
+              {sortField !== 'default_employee_order' && (
+                <button
+                  onClick={() => setSortDirection(d => d === 'asc' ? 'desc' : 'asc')}
+                  className="p-1 border border-slate-300 rounded hover:bg-slate-200 text-slate-600 shrink-0 cursor-pointer"
+                  title={`Đổi hướng sắp xếp (${sortDirection === 'asc' ? 'Tăng dần' : 'Giảm dần'})`}
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
             {(searchTerm || selectedDepartment !== 'all' || filterMealPlan !== 'all') && (
               <button
                 onClick={() => {
@@ -631,6 +727,34 @@ export const MealView: React.FC<MealViewProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Banner lưu thứ tự khi khác mặc định */}
+        {sortField !== 'default_employee_order' && onReorderEmployees && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-900 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <ArrowUpDown className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>
+                Đang sắp xếp tạm thời theo <strong>{sortField === 'employeeCode' ? 'Mã NV' : sortField === 'fullName' ? 'Họ tên' : sortField === 'department' ? 'Phòng ban' : 'Hình thức'}</strong> ({sortDirection === 'asc' ? 'A→Z' : 'Z→A'}). Bạn có muốn lưu thứ tự này làm thứ tự chuẩn cho <strong>Danh sách người lao động</strong> không?
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+              <button
+                onClick={handleSaveCurrentSortAsDefault}
+                className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-md transition-colors shadow-2xs cursor-pointer"
+                title="Lưu thứ tự này làm thứ tự mặc định của Danh sách người lao động"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Lưu thứ tự này</span>
+              </button>
+              <button
+                onClick={() => setSortField('default_employee_order')}
+                className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold rounded-md transition-colors cursor-pointer"
+              >
+                Đặt lại mặc định
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Selected Employees Quick Action Banner */}
         {selectedEmployeeIds.length > 0 && (
@@ -709,7 +833,7 @@ export const MealView: React.FC<MealViewProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredEmployees.map(emp => {
+                filteredEmployees.map((emp, empIdx) => {
                   const reg = getEmployeeMealReg(emp.id);
                   const tk = tkMap.get(emp.id);
                   const actualMeals = tk?.totalMeals ?? 0;
@@ -742,7 +866,31 @@ export const MealView: React.FC<MealViewProps> = ({
                         />
                       </td>
 
-                      <td className="px-4 py-3.5 font-mono font-bold text-slate-900">{emp.employeeCode}</td>
+                      <td className="px-4 py-3.5 font-mono font-bold text-slate-900">
+                        <div className="flex items-center gap-1.5 justify-between">
+                          <span>{emp.employeeCode}</span>
+                          {onReorderEmployees && (
+                            <div className="flex flex-col gap-0.5 opacity-60 hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => handleMoveEmployee(emp.id, 'up')}
+                                disabled={empIdx === 0}
+                                title="Di chuyển lên trên (cập nhật vị trí trong Danh sách NLĐ)"
+                                className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => handleMoveEmployee(emp.id, 'down')}
+                                disabled={empIdx === filteredEmployees.length - 1}
+                                title="Di chuyển xuống dưới (cập nhật vị trí trong Danh sách NLĐ)"
+                                className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3.5 font-bold text-slate-800">{emp.fullName}</td>
                       <td className="px-4 py-3.5 text-slate-600">{depMap.get(emp.departmentId)}</td>
 

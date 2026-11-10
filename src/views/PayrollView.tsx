@@ -19,7 +19,11 @@ import {
   AlertCircle,
   CheckSquare,
   Square,
-  Lock
+  Lock,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Save
 } from 'lucide-react';
 import { 
   PayrollRecord, 
@@ -32,6 +36,8 @@ import { formatVND, isEmployeeActiveInMonth } from '../utils/payrollCalculator';
 import { exportPayrollToExcel } from '../utils/excelHelper';
 import { useAuthRole } from '../context/AuthRoleContext';
 
+type PayrollSortField = 'default_employee_order' | 'employeeCode' | 'fullName' | 'idCardNumber' | 'department' | 'netSalary';
+
 interface PayrollViewProps {
   payrolls: PayrollRecord[];
   employees: Employee[];
@@ -43,6 +49,7 @@ interface PayrollViewProps {
   onUpdatePayrollStatus: (payrollId: string, status: PaymentStatus) => void;
   onUpdateAdvancePayment: (payrollId: string, amount: number) => void;
   onNavigateToAnnual?: () => void;
+  onReorderEmployees?: (newEmployees: Employee[]) => void;
 }
 
 export const PayrollView: React.FC<PayrollViewProps> = ({
@@ -55,18 +62,30 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
   onPrintSlip,
   onUpdatePayrollStatus,
   onUpdateAdvancePayment,
-  onNavigateToAnnual
+  onNavigateToAnnual,
+  onReorderEmployees
 }) => {
-  const { canApprovePayroll, canExportData, currentUserRole, selectedEmployeeIdForSelf } = useAuthRole();
+  const { canApprovePayroll, canExportData, canEditEmployees, currentUserRole, selectedEmployeeIdForSelf } = useAuthRole();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [sortField, setSortField] = useState<PayrollSortField>('default_employee_order');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [advanceModal, setAdvanceModal] = useState<{ id: string; name: string; amount: number } | null>(null);
   const [selectedEmpIds, setSelectedEmpIds] = useState<Set<string>>(new Set());
 
   const empMap = new Map((employees || []).map(e => [e.id, e]));
   const depMap = new Map((settings?.departments || []).map(d => [d.id, d.name]));
   const posMap = new Map((settings?.positions || []).map(p => [p.id, p.name]));
+
+  // Bản đồ chỉ số vị trí người lao động chuẩn tại Danh sách người lao động
+  const empOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    (employees || []).forEach((emp, index) => {
+      map.set(emp.id, index);
+    });
+    return map;
+  }, [employees]);
 
   // Tập hợp các số CCCD bị trùng lặp giữa các nhân viên khác nhau
   const duplicateIdCards = useMemo(() => {
@@ -99,6 +118,62 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
         return matchSearch && matchDep && matchStatus;
       });
 
+  // Sắp xếp các bản ghi bảng lương: Mặc định theo đúng vị trí của người lao động trong Danh sách người lao động
+  const sortedPayrolls = useMemo(() => {
+    return [...displayPayrolls].sort((a, b) => {
+      if (sortField === 'default_employee_order') {
+        const orderA = empOrderMap.get(a.employeeId) ?? 999999;
+        const orderB = empOrderMap.get(b.employeeId) ?? 999999;
+        return orderA - orderB;
+      }
+      const empA = empMap.get(a.employeeId);
+      const empB = empMap.get(b.employeeId);
+      if (!empA || !empB) return 0;
+      let cmp = 0;
+      if (sortField === 'employeeCode') {
+        cmp = empA.employeeCode.localeCompare(empB.employeeCode, 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = empA.fullName.localeCompare(empB.fullName, 'vi');
+      } else if (sortField === 'idCardNumber') {
+        cmp = (empA.idCardNumber || '').localeCompare(empB.idCardNumber || '', 'vi', { numeric: true });
+      } else if (sortField === 'department') {
+        const depA = depMap.get(empA.departmentId) || '';
+        const depB = depMap.get(empB.departmentId) || '';
+        cmp = depA.localeCompare(depB, 'vi');
+      } else if (sortField === 'netSalary') {
+        cmp = a.netSalary - b.netSalary;
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [displayPayrolls, sortField, sortDirection, empOrderMap, empMap, depMap]);
+
+  // Thay đổi vị trí người lao động đồng bộ với Danh sách người lao động
+  const handleMoveEmployee = (empId: string, direction: 'up' | 'down') => {
+    const currentIndex = employees.findIndex(e => e.id === empId);
+    if (currentIndex === -1) return;
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= employees.length) return;
+
+    const newEmployees = [...employees];
+    const [moved] = newEmployees.splice(currentIndex, 1);
+    newEmployees.splice(targetIndex, 0, moved);
+
+    setSortField('default_employee_order');
+    onReorderEmployees?.(newEmployees);
+  };
+
+  const handleSaveCurrentSortAsDefault = () => {
+    if (!onReorderEmployees) return;
+    const sortedIds = sortedPayrolls.map(p => p.employeeId);
+    const remaining = employees.filter(e => !sortedIds.includes(e.id));
+    const newEmployees = [
+      ...sortedIds.map(id => empMap.get(id)!).filter(Boolean),
+      ...remaining
+    ];
+    onReorderEmployees(newEmployees);
+    setSortField('default_employee_order');
+  };
+
   // Totals
   const totalBase = payrolls.reduce((s, p) => s + p.baseSalary, 0);
   const totalGross = payrolls.reduce((s, p) => s + p.grossIncome, 0);
@@ -107,7 +182,7 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
   const totalNet = payrolls.reduce((s, p) => s + p.netSalary, 0);
 
   const handleExportExcel = () => {
-    exportPayrollToExcel(payrolls, employees, settings, `${settings.currentMonth}_${settings.currentYear}`);
+    exportPayrollToExcel(sortedPayrolls, employees, settings, `${settings.currentMonth}_${settings.currentYear}`);
   };
 
   const handleSaveAdvance = () => {
@@ -247,7 +322,7 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
 
       {/* Filter and Search Bar */}
       {currentUserRole !== 'employee' && (
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
           <div className="md:col-span-2 relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
@@ -284,6 +359,55 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
               <option value="paid">Đã chuyển khoản</option>
             </select>
           </div>
+
+          <div>
+            <select
+              value={sortField}
+              onChange={e => setSortField(e.target.value as PayrollSortField)}
+              className="w-full px-3 py-2 border border-emerald-300 bg-emerald-50/60 rounded-lg font-semibold text-emerald-950 focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+            >
+              <option value="default_employee_order">Thứ tự: Theo Danh sách người lao động</option>
+              <option value="employeeCode">Sắp xếp theo Mã nhân viên</option>
+              <option value="fullName">Sắp xếp theo Họ và tên</option>
+              <option value="idCardNumber">Sắp xếp theo Số CCCD</option>
+              <option value="department">Sắp xếp theo Phòng ban</option>
+              <option value="netSalary">Sắp xếp theo Thực lĩnh (Net)</option>
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* Banner Lưu thứ tự sắp xếp sang Danh sách người lao động */}
+      {sortField !== 'default_employee_order' && canEditEmployees && onReorderEmployees && (
+        <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-blue-900 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="w-4 h-4 text-blue-600 shrink-0" />
+            <span>
+              Đang xem bảng lương sắp xếp theo: <strong>{
+                sortField === 'employeeCode' ? 'Mã nhân viên' :
+                sortField === 'fullName' ? 'Họ và tên' :
+                sortField === 'idCardNumber' ? 'Số CCCD' :
+                sortField === 'department' ? 'Phòng ban' : 'Thực lĩnh (Net)'
+              }</strong>.
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSaveCurrentSortAsDefault}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Lưu thứ tự này làm vị trí mặc định cho Danh sách NV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortField('default_employee_order')}
+              className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold rounded-lg transition-colors cursor-pointer"
+            >
+              Đặt lại theo Danh sách NV
+            </button>
+          </div>
         </div>
       )}
 
@@ -296,7 +420,7 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
             </div>
             <div>
               <span className="font-bold text-emerald-950">
-                Đã chọn {selectedEmpIds.size} / {displayPayrolls.length} người lao động
+                Đã chọn {selectedEmpIds.size} / {sortedPayrolls.length} người lao động
               </span>
               <span className="text-emerald-700 ml-1.5 hidden sm:inline">
                 để in phiếu lương hoặc xuất dữ liệu
@@ -314,15 +438,15 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
             </button>
             <button
               onClick={() => {
-                if (selectedEmpIds.size === displayPayrolls.length) {
+                if (selectedEmpIds.size === sortedPayrolls.length) {
                   setSelectedEmpIds(new Set());
                 } else {
-                  setSelectedEmpIds(new Set(displayPayrolls.map(p => p.employeeId)));
+                  setSelectedEmpIds(new Set(sortedPayrolls.map(p => p.employeeId)));
                 }
               }}
               className="px-3 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl font-semibold transition-colors cursor-pointer"
             >
-              {selectedEmpIds.size === displayPayrolls.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả đang lọc'}
+              {selectedEmpIds.size === sortedPayrolls.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả đang lọc'}
             </button>
             <button
               onClick={() => setSelectedEmpIds(new Set())}
@@ -343,19 +467,19 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
                 <th className="w-10 px-3 py-3 text-center">
                   <input
                     type="checkbox"
-                    checked={displayPayrolls.length > 0 && selectedEmpIds.size === displayPayrolls.length}
+                    checked={sortedPayrolls.length > 0 && selectedEmpIds.size === sortedPayrolls.length}
                     onChange={() => {
-                      if (selectedEmpIds.size === displayPayrolls.length) {
+                      if (selectedEmpIds.size === sortedPayrolls.length) {
                         setSelectedEmpIds(new Set());
                       } else {
-                        setSelectedEmpIds(new Set(displayPayrolls.map(p => p.employeeId)));
+                        setSelectedEmpIds(new Set(sortedPayrolls.map(p => p.employeeId)));
                       }
                     }}
                     title="Chọn / Bỏ chọn tất cả lao động đang hiển thị"
                     className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
                   />
                 </th>
-                <th className="px-3 py-3">Mã NV</th>
+                <th className="px-3 py-3">Mã NV / Vị Trí</th>
                 <th className="px-3 py-3">Số CCCD</th>
                 <th className="px-3 py-3">Họ và Tên</th>
                 <th className="px-3 py-3">Phòng Ban</th>
@@ -376,14 +500,14 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {displayPayrolls.length === 0 ? (
+              {sortedPayrolls.length === 0 ? (
                 <tr>
                   <td colSpan={17} className="px-6 py-8 text-center text-slate-400">
                     Không có bản ghi bảng lương nào phù hợp.
                   </td>
                 </tr>
               ) : (
-                displayPayrolls.map(p => {
+                sortedPayrolls.map((p, pIdx) => {
                   const emp = empMap.get(p.employeeId);
                   const isDuplicateCccd = emp?.idCardNumber ? duplicateIdCards.has(emp.idCardNumber.trim()) : false;
                   const totalOtAndAllowances = p.otPayTaxable + p.otPayTaxExempt + p.taxableAllowances + p.taxExemptAllowances + p.mealAllowance;
@@ -410,8 +534,32 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
                           className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
                         />
                       </td>
-                      <td className="px-3 py-3 font-mono font-bold text-slate-800">
-                        {emp?.employeeCode}
+                      <td className="px-3 py-3 font-mono">
+                        <div className="flex items-center gap-1.5">
+                          {canEditEmployees && onReorderEmployees && (
+                            <div className="flex flex-col items-center gap-0.5 mr-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleMoveEmployee(p.employeeId, 'up')}
+                                disabled={pIdx === 0}
+                                title="Di chuyển lên trên (thay đổi vị trí người lao động)"
+                                className="p-0.5 hover:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-400 hover:text-slate-800 rounded transition-colors cursor-pointer"
+                              >
+                                <ArrowUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveEmployee(p.employeeId, 'down')}
+                                disabled={pIdx === sortedPayrolls.length - 1}
+                                title="Di chuyển xuống dưới (thay đổi vị trí người lao động)"
+                                className="p-0.5 hover:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-400 hover:text-slate-800 rounded transition-colors cursor-pointer"
+                              >
+                                <ArrowDown className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                          <span className="font-bold text-slate-800">{emp?.employeeCode}</span>
+                        </div>
                       </td>
                       <td className="px-3 py-3 font-mono">
                         <div className="font-semibold text-slate-900">

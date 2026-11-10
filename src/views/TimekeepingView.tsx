@@ -27,9 +27,12 @@ import {
   ChevronRight,
   CalendarDays,
   RotateCcw,
-  RefreshCw,
   AlertTriangle,
-  ChevronDown
+  ChevronDown,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Save
 } from 'lucide-react';
 import { 
   TimekeepingRecord, 
@@ -55,6 +58,8 @@ import {
   getSuggestedOtRange 
 } from '../utils/shiftHelper';
 
+type TkSortField = 'default_employee_order' | 'employeeCode' | 'fullName' | 'department';
+
 interface TimekeepingViewProps {
   timekeepings: TimekeepingRecord[];
   employees: Employee[];
@@ -63,6 +68,7 @@ interface TimekeepingViewProps {
   onUpdateTimekeeping: (updated: TimekeepingRecord) => void;
   onBatchUpdateTimekeeping: (all: TimekeepingRecord[]) => void;
   onMonthChange?: (month: number, year: number) => void;
+  onReorderEmployees?: (newEmployees: Employee[]) => void;
 }
 
 export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
@@ -72,18 +78,30 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
   mealRegistrations,
   onUpdateTimekeeping,
   onBatchUpdateTimekeeping,
-  onMonthChange
+  onMonthChange,
+  onReorderEmployees
 }) => {
-  const { canEditTimekeeping, canExportData } = useAuthRole();
+  const { canEditTimekeeping, canExportData, canEditEmployees } = useAuthRole();
   const [activeSubTab, setActiveSubTab] = useState<'grid' | 'ot_details' | 'meal_attendance'>('grid');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
   const [filterShift, setFilterShift] = useState<string>('all');
   const [filterOnlyOt, setFilterOnlyOt] = useState(false);
+  const [sortField, setSortField] = useState<TkSortField>('default_employee_order');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [printModalMode, setPrintModalMode] = useState<'general' | 'overtime' | 'meals'>('general');
   const [showPrintDropdown, setShowPrintDropdown] = useState(false);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
+
+  // Bản đồ chỉ số vị trí người lao động chuẩn tại Danh sách người lao động
+  const empOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    (employees || []).forEach((emp, index) => {
+      map.set(emp.id, index);
+    });
+    return map;
+  }, [employees]);
 
   // Chọn tháng & năm để xem và cập nhật bảng chấm công
   const [selectedMonth, setSelectedMonth] = useState<number>(settings.currentMonth);
@@ -275,7 +293,7 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
   };
 
   // Filter employees
-  const filteredEmployees = employees.filter(e => {
+  const baseFilteredEmployees = employees.filter(e => {
     // 0. Loại bỏ người lao động đã nghỉ việc, điều chuyển, thai sản ở các tháng không liên quan
     if (!isEmployeeActiveInMonth(e, month, year)) {
       return false;
@@ -302,6 +320,51 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
 
     return matchSearch && matchDep && matchShift && matchOt;
   });
+
+  const sortedFilteredEmployees = useMemo(() => {
+    return [...baseFilteredEmployees].sort((a, b) => {
+      if (sortField === 'default_employee_order') {
+        const orderA = empOrderMap.get(a.id) ?? 999999;
+        const orderB = empOrderMap.get(b.id) ?? 999999;
+        return orderA - orderB;
+      }
+      let cmp = 0;
+      if (sortField === 'employeeCode') {
+        cmp = a.employeeCode.localeCompare(b.employeeCode, 'vi', { numeric: true });
+      } else if (sortField === 'fullName') {
+        cmp = a.fullName.localeCompare(b.fullName, 'vi');
+      } else if (sortField === 'department') {
+        cmp = (depMap.get(a.departmentId) || '').localeCompare(depMap.get(b.departmentId) || '', 'vi');
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [baseFilteredEmployees, sortField, sortDirection, empOrderMap, depMap]);
+
+  const handleMoveEmployee = (empId: string, direction: 'up' | 'down') => {
+    const currentIndex = employees.findIndex(e => e.id === empId);
+    if (currentIndex === -1) return;
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= employees.length) return;
+    const newEmployees = [...employees];
+    const [moved] = newEmployees.splice(currentIndex, 1);
+    newEmployees.splice(targetIndex, 0, moved);
+    setSortField('default_employee_order');
+    onReorderEmployees?.(newEmployees);
+  };
+
+  const handleSaveCurrentSortAsDefault = () => {
+    if (!onReorderEmployees) return;
+    const sortedIds = sortedFilteredEmployees.map(e => e.id);
+    const remaining = employees.filter(e => !sortedIds.includes(e.id));
+    const newEmployees = [
+      ...sortedIds.map(id => employees.find(e => e.id === id)!).filter(Boolean),
+      ...remaining
+    ];
+    onReorderEmployees(newEmployees);
+    setSortField('default_employee_order');
+  };
+
+  const filteredEmployees = sortedFilteredEmployees;
 
   // KPI summaries for selected month
   const activeMonthTimekeepings = employees
@@ -1509,7 +1572,7 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
         </div>
 
         {/* Filter controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-slate-100">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 pt-2 border-t border-slate-100">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
             <input
@@ -1550,6 +1613,30 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
             </select>
           </div>
 
+          {/* Sắp xếp thứ tự người lao động */}
+          <div className="flex items-center gap-1.5">
+            <select
+              value={sortField}
+              onChange={e => setSortField(e.target.value as TkSortField)}
+              className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs bg-slate-50 font-medium text-slate-700"
+              title="Thứ tự hiển thị nhân viên trong bảng chấm công"
+            >
+              <option value="default_employee_order">Thứ tự: Theo Danh sách NLĐ (Mặc định)</option>
+              <option value="employeeCode">Sắp xếp: Theo Mã nhân viên</option>
+              <option value="fullName">Sắp xếp: Theo Họ và tên</option>
+              <option value="department">Sắp xếp: Theo Phòng ban</option>
+            </select>
+            {sortField !== 'default_employee_order' && (
+              <button
+                onClick={() => setSortDirection(d => d === 'asc' ? 'desc' : 'asc')}
+                className="p-1.5 border border-slate-300 rounded-lg hover:bg-slate-100 text-slate-600 shrink-0 cursor-pointer"
+                title={`Đổi hướng sắp xếp (${sortDirection === 'asc' ? 'Tăng dần' : 'Giảm dần'})`}
+              >
+                <ArrowUpDown className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
           <div className="flex items-center">
             <label className="flex items-center gap-2 cursor-pointer select-none text-slate-700 font-semibold">
               <input
@@ -1558,10 +1645,38 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
                 onChange={e => setFilterOnlyOt(e.target.checked)}
                 className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500 cursor-pointer"
               />
-              <span>Chỉ hiển thị nhân viên có OT</span>
+              <span>Chỉ hiển thị có OT</span>
             </label>
           </div>
         </div>
+
+        {/* Banner lưu thứ tự khi khác mặc định */}
+        {sortField !== 'default_employee_order' && onReorderEmployees && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-900 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <ArrowUpDown className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>
+                Đang sắp xếp tạm thời theo <strong>{sortField === 'employeeCode' ? 'Mã NV' : sortField === 'fullName' ? 'Họ tên' : 'Phòng ban'}</strong> ({sortDirection === 'asc' ? 'A→Z' : 'Z→A'}). Bạn có muốn lưu thứ tự này làm thứ tự chuẩn cho <strong>Danh sách người lao động</strong> không?
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+              <button
+                onClick={handleSaveCurrentSortAsDefault}
+                className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-md transition-colors shadow-2xs cursor-pointer"
+                title="Lưu thứ tự này làm thứ tự mặc định của Danh sách người lao động"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Lưu thứ tự này</span>
+              </button>
+              <button
+                onClick={() => setSortField('default_employee_order')}
+                className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold rounded-md transition-colors cursor-pointer"
+              >
+                Đặt lại mặc định
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Banner thông báo tháng chưa chấm công */}
@@ -1645,14 +1760,36 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filteredEmployees.map(emp => {
+                  filteredEmployees.map((emp, empIdx) => {
                     const tk = getEmployeeTimekeeping(emp.id);
                     const isDuplicateCccd = emp.idCardNumber ? duplicateIdCards.has(emp.idCardNumber.trim()) : false;
 
                     return (
                       <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="p-2 text-left font-mono font-bold text-slate-800 border-r border-slate-200 sticky left-0 bg-white z-10">
-                          {emp.employeeCode}
+                          <div className="flex items-center gap-1.5 justify-between">
+                            <span>{emp.employeeCode}</span>
+                            {onReorderEmployees && (
+                              <div className="flex flex-col gap-0.5 opacity-60 hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => handleMoveEmployee(emp.id, 'up')}
+                                  disabled={empIdx === 0}
+                                  title="Di chuyển lên trên (cập nhật vị trí trong Danh sách NLĐ)"
+                                  className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                                >
+                                  <ArrowUp className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleMoveEmployee(emp.id, 'down')}
+                                  disabled={empIdx === filteredEmployees.length - 1}
+                                  title="Di chuyển xuống dưới (cập nhật vị trí trong Danh sách NLĐ)"
+                                  className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                                >
+                                  <ArrowDown className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="p-2 text-center font-mono border-r border-slate-200 sticky left-[65px] bg-white z-10">
                           <div className="font-semibold text-slate-900">{emp.idCardNumber || '—'}</div>
@@ -2276,7 +2413,29 @@ export const TimekeepingView: React.FC<TimekeepingViewProps> = ({
                               {idx + 1}
                             </td>
                             <td className="px-3 py-3 font-mono font-bold text-slate-700">
-                              {emp.employeeCode}
+                              <div className="flex items-center gap-1.5 justify-between">
+                                <span>{emp.employeeCode}</span>
+                                {onReorderEmployees && (
+                                  <div className="flex flex-col gap-0.5 opacity-60 hover:opacity-100 transition-opacity">
+                                    <button
+                                      onClick={() => handleMoveEmployee(emp.id, 'up')}
+                                      disabled={idx === 0}
+                                      title="Di chuyển lên trên"
+                                      className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                                    >
+                                      <ArrowUp className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleMoveEmployee(emp.id, 'down')}
+                                      disabled={idx === filteredEmployees.length - 1}
+                                      title="Di chuyển xuống dưới"
+                                      className="p-0.5 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed"
+                                    >
+                                      <ArrowDown className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </td>
                             <td className="px-3 py-3 font-mono">
                               <div className="font-semibold text-slate-900">{emp.idCardNumber || '—'}</div>

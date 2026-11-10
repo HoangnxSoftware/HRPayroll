@@ -828,6 +828,7 @@ function PayrollAppContent() {
               onUpdatePayrollStatus={handleUpdatePayrollStatus}
               onUpdateAdvancePayment={handleUpdateAdvancePayment}
               onNavigateToAnnual={() => setActiveTab('annual_payroll')}
+              onReorderEmployees={setEmployees}
             />
           )}
 
@@ -840,6 +841,7 @@ function PayrollAppContent() {
               specialAllowances={specialAllowances}
               dependents={dependents}
               settings={settings}
+              onReorderEmployees={setEmployees}
             />
           )}
 
@@ -852,6 +854,7 @@ function PayrollAppContent() {
               onUpdateTimekeeping={handleUpdateTimekeeping}
               onBatchUpdateTimekeeping={handleBatchUpdateTimekeeping}
               onMonthChange={handleMonthChange}
+              onReorderEmployees={setEmployees}
             />
           )}
 
@@ -904,6 +907,7 @@ function PayrollAppContent() {
               settings={settings}
               onUpdateMeal={handleUpdateMeal}
               onBatchUpdateMeals={handleBatchUpdateMeals}
+              onReorderEmployees={setEmployees}
             />
           )}
 
@@ -930,6 +934,7 @@ function PayrollAppContent() {
               specialAllowances={specialAllowances}
               dependents={dependents}
               onUpdateSettings={setSettings}
+              onReorderEmployees={setEmployees}
             />
           )}
 
