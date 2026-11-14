@@ -61,7 +61,7 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 function PayrollAppContent() {
-  const { currentUser, isAuthenticated, currentUserRole, logout } = useAuthRole();
+  const { currentUser, isAuthenticated, currentUserRole, logout, resetOfficialUsersForNewDatabase } = useAuthRole();
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -412,6 +412,7 @@ function PayrollAppContent() {
     setMealRegistrations(sanitizeMealRegistrations(newData.mealRegistrations));
     setSpecialAllowances(sanitizeSpecialAllowances(newData.specialAllowances));
     setTimekeepings(sanitizeTimekeepings(newData.timekeepings));
+    resetOfficialUsersForNewDatabase();
 
     if (spreadsheetInfo) {
       localStorage.setItem('payroll_is_demo_mode', 'false');

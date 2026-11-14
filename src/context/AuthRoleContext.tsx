@@ -14,6 +14,7 @@ interface AuthRoleContextType {
   login: (username: string, password?: string, isDemo?: boolean) => { success: boolean; error?: string };
   logout: () => void;
   resetOfficialAdminPassword: () => void;
+  resetOfficialUsersForNewDatabase: () => void;
   switchUser: (userId: string) => void;
   addUser: (user: AppUser) => void;
   updateUser: (user: AppUser) => void;
@@ -73,6 +74,19 @@ const createInitialDemoUsers = (): AppUser[] =>
       ? { ...u, password: DEMO_DEFAULT_ADMIN_PASSWORD }
       : { ...u }
   );
+
+export const createNewDatabaseAdminUser = (): AppUser[] => [
+  {
+    id: 'user-admin',
+    username: 'admin',
+    password: OFFICIAL_DEFAULT_ADMIN_PASSWORD,
+    name: 'admin',
+    email: 'admin@company.com.vn',
+    role: 'admin',
+    status: 'active',
+    lastLogin: 'Chưa đăng nhập'
+  }
+];
 
 export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authMode, setAuthMode] = useState<'official' | 'demo'>(() => {
@@ -248,6 +262,27 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   };
 
+  const resetOfficialUsersForNewDatabase = () => {
+    const newUsers = createNewDatabaseAdminUser();
+    setAuthMode('official');
+    setOfficialUsers(newUsers);
+    try {
+      localStorage.setItem(OFFICIAL_USERS_STORAGE_KEY, JSON.stringify(newUsers));
+    } catch (e) {
+      console.error('Failed to save new database official admin user', e);
+    }
+    if (currentUser) {
+      if (currentUser.id === 'user-admin' || currentUser.username.toLowerCase() === 'admin') {
+        setCurrentUser({
+          ...newUsers[0],
+          lastLogin: currentUser.lastLogin
+        });
+      } else {
+        setCurrentUser(null);
+      }
+    }
+  };
+
   const switchUser = (userId: string) => {
     const target = users.find(u => u.id === userId);
     if (target) {
@@ -337,6 +372,7 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         login,
         logout,
         resetOfficialAdminPassword,
+        resetOfficialUsersForNewDatabase,
         switchUser,
         addUser,
         updateUser,

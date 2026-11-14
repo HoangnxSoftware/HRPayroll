@@ -126,7 +126,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onLoadDataFromSpreadsheet,
   onResetToDemoData
 }) => {
-  const { login, validateCredentials, resetOfficialAdminPassword, isAuthenticated } = useAuthRole();
+  const { login, validateCredentials, resetOfficialAdminPassword, resetOfficialUsersForNewDatabase, isAuthenticated } = useAuthRole();
   const [activeTab, setActiveTab] = useState<'login' | 'google'>('login');
   
   // Credentials
@@ -332,6 +332,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setHrSalaryFolder(res.folder);
       setIsPendingNewCompany(res.cleanData);
       saveDatabaseConnectionToStorage({ id: res.id, name: res.title, url: res.url });
+
+      resetOfficialUsersForNewDatabase();
 
       // Also apply right away to app if callback provided
       if (onApplyNewCompanyData) {
