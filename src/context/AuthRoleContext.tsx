@@ -2,12 +2,18 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserRole, AppUser, RolePermissions } from '../types';
 import { INITIAL_USERS } from '../data/initialData';
 
+export const OFFICIAL_DEFAULT_ADMIN_PASSWORD = 'Joeblack0107@';
+export const DEMO_DEFAULT_ADMIN_PASSWORD = '123';
+
 interface AuthRoleContextType {
   users: AppUser[];
   currentUser: AppUser | null;
   isAuthenticated: boolean;
-  login: (username: string, password?: string) => { success: boolean; error?: string };
+  authMode: 'official' | 'demo';
+  validateCredentials: (username: string, password: string | undefined, isDemo: boolean) => { success: boolean; error?: string; user?: AppUser };
+  login: (username: string, password?: string, isDemo?: boolean) => { success: boolean; error?: string };
   logout: () => void;
+  resetOfficialAdminPassword: () => void;
   switchUser: (userId: string) => void;
   addUser: (user: AppUser) => void;
   updateUser: (user: AppUser) => void;
@@ -49,34 +55,87 @@ interface AuthRoleContextType {
 
 const AuthRoleContext = createContext<AuthRoleContextType | undefined>(undefined);
 
-const USERS_STORAGE_KEY = 'vietthanh_payroll_users';
+const DEMO_USERS_STORAGE_KEY = 'vietthanh_demo_users';
+const OFFICIAL_USERS_STORAGE_KEY = 'vietthanh_official_users';
+const LEGACY_USERS_STORAGE_KEY = 'vietthanh_payroll_users';
 const CURRENT_USER_STORAGE_KEY = 'vietthanh_current_user';
 
+const createInitialOfficialUsers = (): AppUser[] =>
+  INITIAL_USERS.map(u =>
+    u.username.toLowerCase() === 'admin'
+      ? { ...u, password: OFFICIAL_DEFAULT_ADMIN_PASSWORD }
+      : { ...u }
+  );
+
+const createInitialDemoUsers = (): AppUser[] =>
+  INITIAL_USERS.map(u =>
+    u.username.toLowerCase() === 'admin'
+      ? { ...u, password: DEMO_DEFAULT_ADMIN_PASSWORD }
+      : { ...u }
+  );
+
 export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [users, setUsers] = useState<AppUser[]>(() => {
+  const [authMode, setAuthMode] = useState<'official' | 'demo'>(() => {
     try {
-      const saved = localStorage.getItem(USERS_STORAGE_KEY);
+      return localStorage.getItem('payroll_is_demo_mode') === 'true' ? 'demo' : 'official';
+    } catch {
+      return 'official';
+    }
+  });
+
+  const [officialUsers, setOfficialUsers] = useState<AppUser[]>(() => {
+    try {
+      const saved = localStorage.getItem(OFFICIAL_USERS_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch (e) {
-      console.error('Failed to load users from localStorage', e);
+      console.error('Failed to load official users from localStorage', e);
     }
-    return INITIAL_USERS;
+    return createInitialOfficialUsers();
   });
+
+  const [demoUsers, setDemoUsers] = useState<AppUser[]>(() => {
+    try {
+      const saved = localStorage.getItem(DEMO_USERS_STORAGE_KEY) || localStorage.getItem(LEGACY_USERS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((u: AppUser) =>
+            u.username.toLowerCase() === 'admin' && !u.password
+              ? { ...u, password: DEMO_DEFAULT_ADMIN_PASSWORD }
+              : u
+          );
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load demo users from localStorage', e);
+    }
+    return createInitialDemoUsers();
+  });
+
+  const users = authMode === 'demo' ? demoUsers : officialUsers;
 
   // Khởi tạo currentUser = null để khi mở hoặc chạy phần mềm luôn hiện cửa sổ đăng nhập đầu tiên
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
 
-  // Lưu danh sách người dùng vào localStorage khi thay đổi
+  // Lưu danh sách người dùng chính thức và demo vào localStorage khi thay đổi
   useEffect(() => {
     try {
-      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+      localStorage.setItem(OFFICIAL_USERS_STORAGE_KEY, JSON.stringify(officialUsers));
     } catch (e) {
-      console.error('Failed to save users', e);
+      console.error('Failed to save official users', e);
     }
-  }, [users]);
+  }, [officialUsers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DEMO_USERS_STORAGE_KEY, JSON.stringify(demoUsers));
+    } catch (e) {
+      console.error('Failed to save demo users', e);
+    }
+  }, [demoUsers]);
 
   // Lưu phiên đăng nhập hiện tại
   useEffect(() => {
@@ -103,19 +162,32 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const currentUserRole: UserRole = currentUser?.role || 'admin';
 
+  const setActiveUsers = (updater: (prev: AppUser[]) => AppUser[], modeOverride?: 'official' | 'demo') => {
+    const targetMode = modeOverride || authMode;
+    if (targetMode === 'demo') {
+      setDemoUsers(updater);
+    } else {
+      setOfficialUsers(updater);
+    }
+  };
+
   const setCurrentUserRole = (role: UserRole) => {
     if (currentUser) {
       const updated = { ...currentUser, role };
       setCurrentUser(updated);
-      setUsers(prev => prev.map(u => u.id === currentUser.id ? updated : u));
+      setActiveUsers(prev => prev.map(u => u.id === currentUser.id ? updated : u));
     }
   };
 
-  const login = (username: string, password?: string): { success: boolean; error?: string } => {
+  const validateCredentials = (
+    username: string,
+    password: string | undefined,
+    isDemo: boolean
+  ): { success: boolean; error?: string; user?: AppUser } => {
     const cleanUsername = username.trim().toLowerCase();
-    const foundUser = users.find(u => 
-      u.username.toLowerCase() === cleanUsername || 
-      u.email.toLowerCase() === cleanUsername
+    const pool = isDemo ? demoUsers : officialUsers;
+    const foundUser = pool.find(
+      u => u.username.toLowerCase() === cleanUsername || u.email.toLowerCase() === cleanUsername
     );
 
     if (!foundUser) {
@@ -126,20 +198,36 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { success: false, error: 'Tài khoản này đã bị tạm khóa. Vui lòng liên hệ Quản trị viên!' };
     }
 
-    // Nếu có mật khẩu cấu hình, kiểm tra mật khẩu
-    if (foundUser.password && password !== undefined) {
-      if (foundUser.password !== password) {
-        return { success: false, error: 'Mật khẩu không chính xác. Vui lòng thử lại!' };
-      }
+    const expectedPassword = foundUser.password ?? (
+      foundUser.username.toLowerCase() === 'admin'
+        ? (isDemo ? DEMO_DEFAULT_ADMIN_PASSWORD : OFFICIAL_DEFAULT_ADMIN_PASSWORD)
+        : ''
+    );
+    const providedPassword = password ?? '';
+    if (expectedPassword !== providedPassword) {
+      return { success: false, error: 'Mật khẩu không chính xác. Vui lòng thử lại!' };
+    }
+
+    return { success: true, user: foundUser };
+  };
+
+  const login = (username: string, password?: string, isDemo?: boolean): { success: boolean; error?: string } => {
+    const targetDemo = isDemo ?? (localStorage.getItem('payroll_is_demo_mode') === 'true');
+    const targetMode: 'official' | 'demo' = targetDemo ? 'demo' : 'official';
+    const check = validateCredentials(username, password, targetDemo);
+
+    if (!check.success || !check.user) {
+      return { success: false, error: check.error || 'Đăng nhập không thành công!' };
     }
 
     const updatedUser: AppUser = {
-      ...foundUser,
+      ...check.user,
       lastLogin: new Date().toLocaleString('vi-VN', { hour12: false })
     };
 
+    setAuthMode(targetMode);
     setCurrentUser(updatedUser);
-    setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+    setActiveUsers(prev => prev.map(u => (u.id === updatedUser.id ? updatedUser : u)), targetMode);
     if (updatedUser.employeeId) {
       setSelectedEmployeeIdForSelf(updatedUser.employeeId);
     }
@@ -150,6 +238,16 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setCurrentUser(null);
   };
 
+  const resetOfficialAdminPassword = () => {
+    setOfficialUsers(prev =>
+      prev.map(u =>
+        u.id === 'user-admin' || u.username.toLowerCase() === 'admin'
+          ? { ...u, password: OFFICIAL_DEFAULT_ADMIN_PASSWORD }
+          : u
+      )
+    );
+  };
+
   const switchUser = (userId: string) => {
     const target = users.find(u => u.id === userId);
     if (target) {
@@ -158,7 +256,7 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         lastLogin: new Date().toLocaleString('vi-VN', { hour12: false })
       };
       setCurrentUser(updatedUser);
-      setUsers(prev => prev.map(u => u.id === target.id ? updatedUser : u));
+      setActiveUsers(prev => prev.map(u => u.id === target.id ? updatedUser : u));
       if (target.employeeId) {
         setSelectedEmployeeIdForSelf(target.employeeId);
       }
@@ -166,11 +264,11 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const addUser = (newUser: AppUser) => {
-    setUsers(prev => [...prev, newUser]);
+    setActiveUsers(prev => [...prev, newUser]);
   };
 
   const updateUser = (updatedUser: AppUser) => {
-    setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+    setActiveUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
     if (currentUser?.id === updatedUser.id) {
       setCurrentUser(updatedUser);
     }
@@ -181,7 +279,7 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       alert('Không thể xóa tài khoản đang đăng nhập!');
       return;
     }
-    setUsers(prev => prev.filter(u => u.id !== userId));
+    setActiveUsers(prev => prev.filter(u => u.id !== userId));
   };
 
   // Tính toán quyền hạn (Custom permissions overrides default role rules if specified)
@@ -234,8 +332,11 @@ export const AuthRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         users,
         currentUser,
         isAuthenticated: !!currentUser,
+        authMode,
+        validateCredentials,
         login,
         logout,
+        resetOfficialAdminPassword,
         switchUser,
         addUser,
         updateUser,

@@ -25,9 +25,11 @@ import {
   AlertOctagon,
   ShieldAlert,
   ArrowLeft,
-  AlertTriangle
+  AlertTriangle,
+  Phone,
+  KeyRound
 } from 'lucide-react';
-import { useAuthRole } from '../context/AuthRoleContext';
+import { useAuthRole, DEMO_DEFAULT_ADMIN_PASSWORD } from '../context/AuthRoleContext';
 import { SystemSettings, GoogleSyncState } from '../types';
 import { googleSignIn, logout, getCurrentUser, hasValidGoogleToken } from '../services/authService';
 import { 
@@ -124,7 +126,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onLoadDataFromSpreadsheet,
   onResetToDemoData
 }) => {
-  const { login, isAuthenticated, users } = useAuthRole();
+  const { login, validateCredentials, resetOfficialAdminPassword, isAuthenticated } = useAuthRole();
   const [activeTab, setActiveTab] = useState<'login' | 'google'>('login');
   
   // Credentials
@@ -133,6 +135,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showForgotPasswordConfirmModal, setShowForgotPasswordConfirmModal] = useState(false);
+  const [showForgotPasswordNoticeModal, setShowForgotPasswordNoticeModal] = useState(false);
+
+  // Luôn xóa trắng ô mật khẩu khi mở cửa sổ đăng nhập (không tự điền mật khẩu mặc định)
+  useEffect(() => {
+    if (isOpen) {
+      setPassword('');
+      setShowPassword(false);
+      setErrorMessage(null);
+      setShowForgotPasswordConfirmModal(false);
+      setShowForgotPasswordNoticeModal(false);
+    }
+  }, [isOpen]);
 
   // Red Warning Confirmation Modal for Demo Data Mode
   const [showDemoWarningModal, setShowDemoWarningModal] = useState(false);
@@ -246,6 +261,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   // Select an existing spreadsheet from list
   const handleSelectSpreadsheet = (file: DriveSpreadsheetItem) => {
     const fileUrl = file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`;
+    localStorage.setItem('payroll_is_demo_mode', 'false');
+    setSyncState(prev => ({ ...prev, isDemoMode: false }));
     setSelectedFileId(file.id);
     setSelectedFileName(file.name);
     setSelectedFileUrl(fileUrl);
@@ -265,6 +282,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       const details = await fetchSpreadsheetDetails(cleanId);
       // Đảm bảo bảng tính được tập trung vào thư mục HR-Salary
       const { folder, moved } = await ensureSpreadsheetInHRSalaryFolder(cleanId);
+      localStorage.setItem('payroll_is_demo_mode', 'false');
+      setSyncState(prev => ({ ...prev, isDemoMode: false }));
       setHrSalaryFolder(folder);
       setSelectedFileId(details.id);
       setSelectedFileName(details.title);
@@ -323,8 +342,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         });
       }
 
+      localStorage.setItem('payroll_is_demo_mode', 'false');
       setSyncState(prev => ({
         ...prev,
+        isDemoMode: false,
         isConnected: true,
         spreadsheetId: res.id,
         spreadsheetName: res.title,
@@ -358,6 +379,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   // Apply selected database and proceed to login
   const handleApplyAndSwitchToLogin = async () => {
+    if (selectedFileId) {
+      localStorage.setItem('payroll_is_demo_mode', 'false');
+      setSyncState(prev => ({ ...prev, isDemoMode: false }));
+    }
     if (selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet) {
       setIsGoogleProcessing(true);
       try {
@@ -446,12 +471,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }
     }
 
-    const result = login(uname, pwd || '123');
+    const result = login(uname, pwd ?? '', isDemo);
     if (!result.success) {
       setErrorMessage(result.error || 'Đăng nhập không thành công!');
       return;
     }
 
+    setPassword('');
     setSuccessMessage(
       isDemo 
         ? 'Đăng nhập thành công với Dữ liệu mẫu nội bộ (Chế độ Demo - Đã khóa đồng bộ Sheets)!' 
@@ -503,6 +529,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const handleRestoreSavedDatabase = () => {
     const saved = getSavedDatabaseInfo();
     if (saved) {
+      localStorage.setItem('payroll_is_demo_mode', 'false');
+      setSyncState(prev => ({ ...prev, isDemoMode: false }));
       setSelectedFileId(saved.id);
       setSelectedFileName(saved.name);
       setSelectedFileUrl(saved.url);
@@ -513,34 +541,33 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
+  // Mở hộp thoại xác nhận trước khi reset mật khẩu Admin dữ liệu chính thức
+  const handleResetOfficialAdminPassword = () => {
+    setShowForgotPasswordConfirmModal(true);
+  };
+
+  // Thực hiện reset mật khẩu tài khoản Admin dữ liệu chính thức sau khi đã xác nhận
+  const handleConfirmResetOfficialAdminPassword = () => {
+    setShowForgotPasswordConfirmModal(false);
+    resetOfficialAdminPassword();
+    setPassword('');
+    setErrorMessage(null);
+    setShowForgotPasswordNoticeModal(true);
+  };
+
   // Submit Login
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    // If logging into demo data, validate credentials first and show red warning confirmation
+    const validation = validateCredentials(username, password, isTargetingDemo);
+    if (!validation.success) {
+      setErrorMessage(validation.error || 'Tên đăng nhập hoặc mật khẩu không chính xác!');
+      return;
+    }
+
+    // If logging into demo data, show red warning confirmation after credential validation
     if (isTargetingDemo) {
-      const cleanUsername = username.trim().toLowerCase();
-      const foundUser = users.find(u => 
-        u.username.toLowerCase() === cleanUsername || 
-        u.email.toLowerCase() === cleanUsername
-      );
-
-      if (!foundUser) {
-        setErrorMessage('Tên đăng nhập hoặc Email không tồn tại trong hệ thống!');
-        return;
-      }
-
-      if (foundUser.status === 'locked') {
-        setErrorMessage('Tài khoản này đã bị tạm khóa. Vui lòng liên hệ Quản trị viên!');
-        return;
-      }
-
-      if (foundUser.password && password !== undefined && foundUser.password !== password) {
-        setErrorMessage('Mật khẩu không chính xác. Vui lòng thử lại!');
-        return;
-      }
-
       setPendingCredentials({ username, password });
       setShowDemoWarningModal(true);
       return;
@@ -548,54 +575,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     // Nếu kết nối Google Sheets và sai thông tin pháp nhân (Đơn vị / MST):
     if (!isTargetingDemo && activeConnectedId && legalMismatch.isMismatch) {
-      const cleanUsername = username.trim().toLowerCase();
-      const foundUser = users.find(u => 
-        u.username.toLowerCase() === cleanUsername || 
-        u.email.toLowerCase() === cleanUsername
-      );
-
-      if (!foundUser) {
-        setErrorMessage('Tên đăng nhập hoặc Email không tồn tại trong hệ thống!');
-        return;
-      }
-
-      if (foundUser.status === 'locked') {
-        setErrorMessage('Tài khoản này đã bị tạm khóa. Vui lòng liên hệ Quản trị viên!');
-        return;
-      }
-
-      if (foundUser.password && password !== undefined && foundUser.password !== password) {
-        setErrorMessage('Mật khẩu không chính xác. Vui lòng thử lại!');
-        return;
-      }
-
       setPendingLoginCredentials({ username, password });
       setShowMismatchConfirmModal(true);
       return;
     }
 
-    await executeLogin(username, password);
+    await executeLogin(username, password, false);
   };
 
-  // 1-Click Quick Login
-  const handleQuickLogin = async (uname: string, pwd?: string) => {
+  // 1-Click Quick Login (chỉ dành cho chế độ Demo, không tự điền mật khẩu vào ô nhập)
+  const handleQuickLogin = async (uname: string, demoPwd: string) => {
     setUsername(uname);
-    setPassword(pwd || '123');
+    setPassword('');
     setErrorMessage(null);
 
     if (isTargetingDemo) {
-      setPendingCredentials({ username: uname, password: pwd || '123' });
+      setPendingCredentials({ username: uname, password: demoPwd });
       setShowDemoWarningModal(true);
       return;
     }
-
-    if (!isTargetingDemo && activeConnectedId && legalMismatch.isMismatch) {
-      setPendingLoginCredentials({ username: uname, password: pwd || '123' });
-      setShowMismatchConfirmModal(true);
-      return;
-    }
-
-    await executeLogin(uname, pwd || '123');
   };
 
   const handleConfirmMismatchAndLogin = async () => {
@@ -926,15 +924,27 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Mật khẩu truy cập</span>
-                </label>
+                <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Mật khẩu tài khoản:</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleResetOfficialAdminPassword}
+                    className="text-[11px] font-semibold text-amber-700 hover:text-amber-900 hover:underline flex items-center gap-1 cursor-pointer"
+                    title="Reset mật khẩu tài khoản Admin dữ liệu chính thức về mặc định"
+                  >
+                    <KeyRound className="w-3 h-3 shrink-0" />
+                    <span>Quên mật khẩu Admin (Dữ liệu chính thức)? Reset mặc định</span>
+                  </button>
+                </div>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    placeholder="Nhập mật khẩu (Mặc định: 123)"
+                    autoComplete="new-password"
+                    placeholder="Nhập mật khẩu tài khoản..."
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     className="w-full pl-3.5 pr-10 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none transition-all"
@@ -963,66 +973,67 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </button>
             </form>
 
-            {/* Quick Demo One-Click Accounts */}
-            <div className="pt-3 border-t border-slate-100">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-amber-500" />
-                  <span>Đăng Nhập Nhanh Mẫu (1-Click)</span>
-                </span>
-                <span className="text-[10px] text-slate-400">Pass: 123</span>
+            {/* Quick Demo One-Click Accounts (Chỉ hiển thị ở chế độ Dữ liệu mẫu, không hiển thị mật khẩu mặc định) */}
+            {isTargetingDemo && (
+              <div className="pt-3 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-500" />
+                    <span>Đăng Nhập Nhanh Dữ Liệu Demo (1-Click)</span>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin('admin', DEMO_DEFAULT_ADMIN_PASSWORD)}
+                    className="p-2 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 border border-slate-200 rounded-xl text-left transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-800 group-hover:text-emerald-700">👑 Quản Trị Viên</span>
+                      <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <div className="text-[10px] text-slate-500">admin / Toàn quyền</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin('ketoantruong', DEMO_DEFAULT_ADMIN_PASSWORD)}
+                    className="p-2 bg-slate-50 hover:bg-blue-50 hover:border-blue-300 border border-slate-200 rounded-xl text-left transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-800 group-hover:text-blue-700">💼 Kế Toán Trưởng</span>
+                      <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <div className="text-[10px] text-slate-500">ketoantruong / Duyệt lương</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin('ketoanluong', DEMO_DEFAULT_ADMIN_PASSWORD)}
+                    className="p-2 bg-slate-50 hover:bg-purple-50 hover:border-purple-300 border border-slate-200 rounded-xl text-left transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-800 group-hover:text-purple-700">📝 Kế Toán Lương</span>
+                      <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-purple-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <div className="text-[10px] text-slate-500">ketoanluong / Chấm công, BH</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLogin('nhanvien', DEMO_DEFAULT_ADMIN_PASSWORD)}
+                    className="p-2 bg-slate-50 hover:bg-teal-50 hover:border-teal-300 border border-slate-200 rounded-xl text-left transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-800 group-hover:text-teal-700">👤 Người Lao Động</span>
+                      <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <div className="text-[10px] text-slate-500">nhanvien / Xem phiếu lương</div>
+                  </button>
+                </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin('admin', '123')}
-                  className="p-2 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 border border-slate-200 rounded-xl text-left transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-800 group-hover:text-emerald-700">👑 Quản Trị Viên</span>
-                    <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                  <div className="text-[10px] text-slate-500">admin / Toàn quyền</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin('ketoantruong', '123')}
-                  className="p-2 bg-slate-50 hover:bg-blue-50 hover:border-blue-300 border border-slate-200 rounded-xl text-left transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-800 group-hover:text-blue-700">💼 Kế Toán Trưởng</span>
-                    <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                  <div className="text-[10px] text-slate-500">ketoantruong / Duyệt lương</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin('ketoanluong', '123')}
-                  className="p-2 bg-slate-50 hover:bg-purple-50 hover:border-purple-300 border border-slate-200 rounded-xl text-left transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-800 group-hover:text-purple-700">📝 Kế Toán Lương</span>
-                    <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-purple-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                  <div className="text-[10px] text-slate-500">ketoanluong / Chấm công, BH</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin('nhanvien', '123')}
-                  className="p-2 bg-slate-50 hover:bg-teal-50 hover:border-teal-300 border border-slate-200 rounded-xl text-left transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-800 group-hover:text-teal-700">👤 Người Lao Động</span>
-                    <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                  <div className="text-[10px] text-slate-500">nhanvien / Xem phiếu lương</div>
-                </button>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -1457,10 +1468,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
         )}
 
-        {/* Security Footnote */}
-        <div className="mt-3 pt-2 text-center text-[10px] text-slate-400 border-t border-slate-100 flex items-center justify-center gap-1">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Dữ liệu bảng lương được đồng bộ bảo mật trực tiếp trên Google Drive cá nhân của bạn.</span>
+        {/* Contact & Security Footnote */}
+        <div className="mt-3 pt-2.5 border-t border-slate-100 space-y-1.5 text-center">
+          <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-900">
+            <Phone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            <span>Thông tin liên hệ: Mr. Hoàng; Số điện thoại/Zalo: 0943.970.656</span>
+          </div>
+          <div className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Dữ liệu bảng lương được đồng bộ bảo mật trực tiếp trên Google Drive cá nhân của bạn.</span>
+          </div>
         </div>
       </div>
 
@@ -1665,6 +1682,114 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>Tiếp tục đồng bộ (Cập nhật thông tin)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL FOR RESETTING OFFICIAL ADMIN PASSWORD */}
+      {showForgotPasswordConfirmModal && (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-amber-300 overflow-hidden relative animate-in zoom-in-95 duration-200">
+            <div className="h-2 bg-gradient-to-r from-amber-500 via-orange-500 to-red-500" />
+            <div className="p-5 sm:p-6 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">
+                      Xác Nhận Reset Mật Khẩu Admin
+                    </h3>
+                    <p className="text-xs text-slate-500">Tài khoản Admin (Dữ liệu chính thức)</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPasswordConfirmModal(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-950 leading-relaxed font-medium">
+                Bạn có chắc chắn muốn thực hiện đặt lại mật khẩu tài khoản <strong>Admin (Dữ liệu chính thức)</strong> về mật khẩu mặc định ban đầu của phần mềm hay không?
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPasswordConfirmModal(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmResetOfficialAdminPassword}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-md shadow-amber-600/20 transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Xác nhận thực hiện</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESET OFFICIAL ADMIN PASSWORD NOTICE MODAL */}
+      {showForgotPasswordNoticeModal && (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-amber-300 overflow-hidden relative animate-in zoom-in-95 duration-200">
+            <div className="h-2 bg-gradient-to-r from-amber-500 via-orange-500 to-emerald-500" />
+            <div className="p-5 sm:p-6 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                    <KeyRound className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">
+                      Reset Mật Khẩu Admin (Dữ Liệu Chính Thức)
+                    </h3>
+                    <p className="text-xs text-slate-500">Khôi phục về mật khẩu mặc định của phần mềm</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPasswordNoticeModal(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5 text-emerald-800">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Đã đặt lại tài khoản Admin dữ liệu chính thức về mật khẩu mặc định ban đầu.</span>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-center space-y-2">
+                <div className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-amber-500 text-white shadow-xs">
+                  <Phone className="w-4 h-4" />
+                </div>
+                <p className="text-sm font-black text-amber-950 leading-relaxed">
+                  Liên hệ tới Mr. Hoàng; số điện thoại/Zalo: 0943.970.656 để được giải quyết!
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowForgotPasswordNoticeModal(false)}
+                className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm rounded-xl transition-colors cursor-pointer"
+              >
+                Đóng thông báo
               </button>
             </div>
           </div>

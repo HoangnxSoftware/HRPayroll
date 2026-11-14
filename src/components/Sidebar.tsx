@@ -73,7 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       canViewEmployees ? { id: 'employees', label: 'Danh Sách Người Lao Động', icon: Users } : null,
       canViewInsurance ? { id: 'insurance', label: 'Bảo Hiểm Xã Hội (BHXH)', icon: ShieldCheck } : null,
       canViewDependents ? { id: 'dependents', label: 'Người Phụ Thuộc (Thuế)', icon: UserCheck } : null,
-      canViewMeal ? { id: 'meal', label: 'Đăng Ký Ăn Ca / Trưa', icon: Utensils } : null,
+      canViewMeal ? { id: 'meal', label: 'Đăng Ký Ăn Ca', icon: Utensils } : null,
       canViewAllowances ? { id: 'allowances', label: 'Phụ Cấp Đặc Thù', icon: Gift } : null,
       canViewTaxReport ? { id: 'tax', label: 'Báo Cáo Thuế TNCN', icon: Receipt } : null,
       canManageUsers ? { id: 'users', label: 'Phân Quyền & Người Dùng', icon: UserCog } : null,

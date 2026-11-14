@@ -82,6 +82,11 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
     newPassword: '123'
   });
 
+  const [isChangingAdminPassword, setIsChangingAdminPassword] = useState(false);
+
+  const isAdminAccount = (user: AppUser | null) =>
+    Boolean(user && (user.role === 'admin' || user.username.toLowerCase() === 'admin'));
+
   const showToast = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3500);
@@ -89,6 +94,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
 
   const handleOpenAdd = () => {
     setEditingUser(null);
+    setIsChangingAdminPassword(false);
     setFormData({
       username: '',
       password: '123',
@@ -102,10 +108,12 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
   };
 
   const handleOpenEdit = (user: AppUser) => {
+    const isAdmin = isAdminAccount(user);
     setEditingUser(user);
+    setIsChangingAdminPassword(false);
     setFormData({
       username: user.username,
-      password: user.password || '123',
+      password: isAdmin ? '' : (user.password || '123'),
       name: user.name,
       email: user.email,
       role: user.role,
@@ -119,10 +127,15 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
     e.preventDefault();
 
     if (editingUser) {
+      const isAdmin = isAdminAccount(editingUser);
+      const nextPassword = isAdmin
+        ? (isChangingAdminPassword && formData.password.trim() ? formData.password : editingUser.password)
+        : formData.password;
+
       updateUser({
         ...editingUser,
         username: formData.username.trim(),
-        password: formData.password,
+        password: nextPassword,
         name: formData.name.trim(),
         email: formData.email.trim(),
         role: formData.role,
@@ -192,18 +205,23 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
     setResetPwdModal({
       isOpen: true,
       user,
-      newPassword: '123'
+      newPassword: isAdminAccount(user) ? '' : '123'
     });
   };
 
   const handleConfirmResetPassword = (e: React.FormEvent) => {
     e.preventDefault();
     if (resetPwdModal.user && resetPwdModal.newPassword.trim()) {
+      const isAdmin = isAdminAccount(resetPwdModal.user);
       updateUser({
         ...resetPwdModal.user,
         password: resetPwdModal.newPassword.trim()
       });
-      showToast(`Đã đổi mật khẩu cho tài khoản "${resetPwdModal.user.username}" thành "${resetPwdModal.newPassword.trim()}"!`);
+      showToast(
+        isAdmin
+          ? `Đã cập nhật mật khẩu mới cho tài khoản "${resetPwdModal.user.username}"!`
+          : `Đã đổi mật khẩu cho tài khoản "${resetPwdModal.user.username}" thành "${resetPwdModal.newPassword.trim()}"!`
+      );
       setResetPwdModal({ isOpen: false, user: null, newPassword: '123' });
     }
   };
@@ -733,15 +751,50 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Mật Khẩu *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Mật khẩu truy cập"
-                    value={formData.password}
-                    onChange={e => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="block font-bold text-slate-700">Mật Khẩu *</label>
+                    {editingUser && isAdminAccount(editingUser) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsChangingAdminPassword(prev => !prev);
+                          setFormData(prev => ({ ...prev, password: '' }));
+                        }}
+                        className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer"
+                      >
+                        {isChangingAdminPassword ? 'Giữ mật khẩu hiện tại (***)' : 'Đổi mật khẩu mới'}
+                      </button>
+                    )}
+                  </div>
+                  {editingUser && isAdminAccount(editingUser) ? (
+                    isChangingAdminPassword ? (
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder="Nhập mật khẩu mới..."
+                        value={formData.password}
+                        onChange={e => setFormData({ ...formData, password: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        readOnly
+                        value="***"
+                        aria-label="Mật khẩu tài khoản admin được ẩn"
+                        className="w-full px-3 py-2 border border-slate-300 bg-slate-100 text-slate-600 rounded-xl font-mono text-xs tracking-widest select-none cursor-not-allowed focus:outline-none"
+                      />
+                    )
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      placeholder="Mật khẩu truy cập"
+                      value={formData.password}
+                      onChange={e => setFormData({ ...formData, password: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  )}
                 </div>
               </div>
 
@@ -883,7 +936,8 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
               <div className="mb-4">
                 <label className="block text-xs font-bold text-slate-700 mb-1">Mật khẩu mới:</label>
                 <input
-                  type="text"
+                  type={isAdminAccount(resetPwdModal.user) ? 'password' : 'text'}
+                  autoComplete="new-password"
                   value={resetPwdModal.newPassword}
                   onChange={e => setResetPwdModal(prev => ({ ...prev, newPassword: e.target.value }))}
                   required
