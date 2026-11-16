@@ -82,6 +82,7 @@ export const MealView: React.FC<MealViewProps> = ({
   const selMonth = Number(selMonthStr) || settings.currentMonth;
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [updateSuccessMessage, setUpdateSuccessMessage] = useState<string | null>(null);
 
   // Row inline edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -251,6 +252,53 @@ export const MealView: React.FC<MealViewProps> = ({
     }
 
     setIsBatchModalOpen(false);
+  };
+
+  // Cập nhật và lưu lại toàn bộ đăng ký ăn ca của kỳ đang chọn
+  const handleUpdateAndSyncMeals = () => {
+    const updatedList: MealRegistration[] = employees.map(emp => {
+      const existing = getEmployeeMealReg(emp.id);
+      if (editingId && existing.id === editingId) {
+        return {
+          ...existing,
+          month: selectedMonth,
+          mealType: editValues.mealType,
+          planType: editValues.mealType === 'canteen' ? 'registered' : editValues.mealType === 'cash' ? 'cash' : 'none',
+          cashMethod: editValues.mealType === 'cash' ? editValues.cashMethod : undefined,
+          ratePerMeal: Number(editValues.ratePerMeal) || 0,
+          customRatePerMeal: Number(editValues.ratePerMeal) || 0,
+          monthlyAllowance: Number(editValues.monthlyAllowance) || 0,
+          monthlyFlatAmount: Number(editValues.monthlyAllowance) || 0,
+          registerLunch: editValues.registerLunch,
+          registerAfternoon: editValues.registerAfternoon,
+          registerDinner: editValues.registerDinner,
+          note: editValues.note
+        };
+      }
+      const effectiveMealType = (existing.mealType || (existing.planType === 'registered' ? 'canteen' : existing.planType) || 'canteen') as MealType;
+      return {
+        ...existing,
+        month: selectedMonth,
+        mealType: effectiveMealType,
+        planType: effectiveMealType === 'canteen' ? 'registered' : effectiveMealType === 'cash' ? 'cash' : 'none',
+        ratePerMeal: existing.ratePerMeal ?? existing.customRatePerMeal ?? settings.standardMealPerDay ?? 35000,
+        customRatePerMeal: existing.customRatePerMeal ?? existing.ratePerMeal ?? settings.standardMealPerDay ?? 35000,
+        monthlyAllowance: existing.monthlyAllowance ?? existing.monthlyFlatAmount ?? settings.monthlyMealFlatRate ?? 1200000,
+        monthlyFlatAmount: existing.monthlyFlatAmount ?? existing.monthlyAllowance ?? settings.monthlyMealFlatRate ?? 1200000
+      };
+    });
+
+    if (onBatchUpdateMeals) {
+      onBatchUpdateMeals(updatedList);
+    } else {
+      updatedList.forEach(m => onUpdateMeal(m));
+    }
+
+    setEditingId(null);
+    setUpdateSuccessMessage(
+      `Đã cập nhật đăng ký ăn ca Tháng ${selMonth}/${selYear} (${employees.length} nhân sự)! Dữ liệu đăng ký ăn ca và Bảng thanh toán lương đã được lưu và tính toán lại.`
+    );
+    setTimeout(() => setUpdateSuccessMessage(null), 6000);
   };
 
   // Đếm số lượng theo hình thức đăng ký ăn ca
@@ -521,20 +569,31 @@ export const MealView: React.FC<MealViewProps> = ({
           </div>
 
           {canEditEmployees && (
-            <button
-              onClick={() => {
-                setBatchForm(prev => ({
-                  ...prev,
-                  targetType: selectedEmployeeIds.length > 0 ? 'selected' : 'all'
-                }));
-                setIsBatchModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-              title="Đăng ký nhanh cho toàn bộ nhân sự, theo phòng ban hoặc theo nhân viên đã chọn"
-            >
-              <Layers className="w-4 h-4" />
-              <span>Đăng Ký Nhanh Hàng Loạt</span>
-            </button>
+            <>
+              <button
+                onClick={handleUpdateAndSyncMeals}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                title="Lưu và cập nhật toàn bộ đăng ký ăn ca tháng này, đồng bộ tính lại bảng thanh toán lương"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Cập nhật đăng ký ăn ca</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setBatchForm(prev => ({
+                    ...prev,
+                    targetType: selectedEmployeeIds.length > 0 ? 'selected' : 'all'
+                  }));
+                  setIsBatchModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                title="Đăng ký nhanh cho toàn bộ nhân sự, theo phòng ban hoặc theo nhân viên đã chọn"
+              >
+                <Layers className="w-4 h-4" />
+                <span>Đăng Ký Nhanh Hàng Loạt</span>
+              </button>
+            </>
           )}
 
           {canExportData && (
@@ -559,6 +618,25 @@ export const MealView: React.FC<MealViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Thông báo cập nhật đăng ký ăn ca thành công */}
+      {updateSuccessMessage && (
+        <div className="p-4 bg-emerald-50 border-2 border-emerald-400 rounded-2xl text-emerald-950 flex items-start justify-between gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-start gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="font-extrabold text-sm text-emerald-900">Đăng Ký Ăn Ca & Bảng Lương Đã Được Cập Nhật!</h4>
+              <p className="text-xs text-emerald-800 mt-0.5 leading-relaxed">{updateSuccessMessage}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setUpdateSuccessMessage(null)}
+            className="text-emerald-700 hover:text-emerald-950 text-xs font-bold p-1 cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">

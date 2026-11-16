@@ -845,6 +845,20 @@ export const exportDataToGoogleSheets = async (
     'ID Hệ Thống'
   ];
 
+  const normalizeSheetMonthKey = (monthVal?: string | number, yearVal?: number): string => {
+    const str = String(monthVal || '').trim();
+    if (str.includes('-')) {
+      const parts = str.split('-');
+      if (parts.length === 2) {
+        return `${parts[0]}-${parts[1].padStart(2, '0')}`;
+      }
+      return str;
+    }
+    const mNum = Number(monthVal) || data.settings.currentMonth;
+    const yNum = yearVal || data.settings.currentYear;
+    return `${yNum}-${String(mNum).padStart(2, '0')}`;
+  };
+
   const currentMonthKey = `${data.settings.currentYear}-${String(data.settings.currentMonth).padStart(2, '0')}`;
   const empCodeMap = new Map(data.employees.map(e => [e.id, e]));
   const mealRowsData: string[][] = [];
@@ -853,16 +867,28 @@ export const exportDataToGoogleSheets = async (
   data.mealRegistrations.forEach(reg => {
     const emp = empCodeMap.get(reg.employeeId);
     if (!emp) return;
-    const mMonth = reg.month || currentMonthKey;
+    const mMonth = reg.month ? normalizeSheetMonthKey(reg.month) : currentMonthKey;
     const key = `${reg.employeeId}_${mMonth}`;
     processedKeys.add(key);
 
-    const tk = data.timekeepings.find(t => t.employeeId === reg.employeeId && (String(t.month) === mMonth || String(t.month) === String(data.settings.currentMonth)));
-    const plan = reg.mealType === 'canteen' ? 'registered' : reg.mealType === 'cash' ? 'cash' : (reg.planType || 'registered');
-    const planLabel = plan === 'registered' ? 'Ăn ca tại bếp' : plan === 'cash' ? (reg.cashMethod === 'by_attendance' ? 'Nhận tiền mặt (Theo chấm công)' : 'Nhận tiền mặt (Tự điền)') : 'Không đăng ký';
+    const tk = data.timekeepings.find(
+      t => t.employeeId === reg.employeeId && normalizeSheetMonthKey(t.month, t.year) === mMonth
+    );
+    const rawPlan = reg.mealType || reg.planType || 'registered';
+    const plan = (rawPlan === 'canteen' || rawPlan === 'registered')
+      ? 'registered'
+      : rawPlan === 'cash'
+        ? 'cash'
+        : 'none';
+    const planLabel = plan === 'registered'
+      ? 'Ăn ca tại bếp'
+      : plan === 'cash'
+        ? (reg.cashMethod === 'by_attendance' ? 'Nhận tiền mặt (Theo chấm công)' : 'Nhận tiền mặt (Tự điền)')
+        : 'Không đăng ký';
 
-    const effectiveRate = reg.ratePerMeal || reg.customRatePerMeal || data.settings.standardMealPerDay || 35000;
-    const cashVal = reg.cashMethod === 'by_attendance' ? ((tk?.totalMeals || 0) * effectiveRate) : (reg.monthlyAllowance || reg.monthlyFlatAmount || data.settings.monthlyMealFlatRate || 1200000);
+    const effectiveRate = reg.ratePerMeal ?? reg.customRatePerMeal ?? data.settings.standardMealPerDay ?? 35000;
+    const rawFlat = reg.monthlyAllowance ?? reg.monthlyFlatAmount ?? data.settings.monthlyMealFlatRate ?? 1200000;
+    const cashVal = reg.cashMethod === 'by_attendance' ? ((tk?.totalMeals || 0) * effectiveRate) : rawFlat;
 
     mealRowsData.push([
       emp.employeeCode,
@@ -886,7 +912,9 @@ export const exportDataToGoogleSheets = async (
   data.employees.forEach(emp => {
     const key = `${emp.id}_${currentMonthKey}`;
     if (!processedKeys.has(key)) {
-      const tk = data.timekeepings.find(t => t.employeeId === emp.id);
+      const tk = data.timekeepings.find(
+        t => t.employeeId === emp.id && normalizeSheetMonthKey(t.month, t.year) === currentMonthKey
+      );
       mealRowsData.push([
         emp.employeeCode,
         emp.fullName,
@@ -962,25 +990,33 @@ export const exportDataToGoogleSheets = async (
     'Tăng Ca Thường (h)',
     'Tăng Ca CN (h)',
     'Tăng Ca Lễ (h)',
-    'Số Bữa Ăn Ca'
+    'Số Bữa Ăn Ca',
+    'Chi Tiết Dữ Liệu (JSON)'
   ];
 
   // Xuất toàn bộ bản ghi chấm công của các tháng đã lưu
   const tkRecordsToExport = data.timekeepings.length > 0 
     ? data.timekeepings 
     : data.employees.map(emp => ({
+        id: `tk-${emp.id}-${currentMonthKey}`,
         employeeId: emp.id,
-        month: `${data.settings.currentYear}-${String(data.settings.currentMonth).padStart(2, '0')}`,
+        year: data.settings.currentYear,
+        month: currentMonthKey,
         days: {} as any,
         actualWorkDays: 0,
         paidLeaveDays: 0,
         holidayDays: 0,
         insuranceLeaveDays: 0,
         unpaidLeaveDays: 0,
+        totalPaidDays: 0,
         totalOtNormalHours: 0,
         totalOtWeekendHours: 0,
         totalOtHolidayHours: 0,
-        totalMeals: 0
+        totalMeals: 0,
+        totalMealsLunch: 0,
+        totalMealsAfternoon: 0,
+        totalMealsDinner: 0,
+        totalActualWorkHours: 0
       }));
 
   const timekeepingRows = [
@@ -993,12 +1029,23 @@ export const exportDataToGoogleSheets = async (
         const item = tk?.days?.[d];
         dayValues.push(item?.symbol || '');
       }
+      const normalizedMonth = normalizeSheetMonthKey(tk?.month, tk?.year);
+      const detailPayload = JSON.stringify({
+        id: tk.id,
+        year: tk.year,
+        totalPaidDays: tk.totalPaidDays,
+        totalMealsLunch: tk.totalMealsLunch || 0,
+        totalMealsAfternoon: tk.totalMealsAfternoon || 0,
+        totalMealsDinner: tk.totalMealsDinner || 0,
+        totalActualWorkHours: tk.totalActualWorkHours || 0,
+        days: tk.days || {}
+      });
       return [
         emp.employeeCode,
         emp.fullName,
         depMap.get(emp.departmentId) || '',
         posMap.get(emp.positionId) || '',
-        tk?.month || `${data.settings.currentYear}-${String(data.settings.currentMonth).padStart(2, '0')}`,
+        normalizedMonth,
         ...dayValues,
         String(tk?.actualWorkDays ?? 0),
         String(tk?.paidLeaveDays ?? 0),
@@ -1008,7 +1055,8 @@ export const exportDataToGoogleSheets = async (
         String(tk?.totalOtNormalHours ?? 0),
         String(tk?.totalOtWeekendHours ?? 0),
         String(tk?.totalOtHolidayHours ?? 0),
-        String(tk?.totalMeals ?? 0)
+        String(tk?.totalMeals ?? 0),
+        detailPayload
       ];
     }).filter(Boolean) as (string | number)[][]
   ];
@@ -1423,19 +1471,21 @@ export const importFullDataFromGoogleSheets = async (
 
   // Helper fetch values
   const fetchValues = async (range: string): Promise<string[][]> => {
-    try {
-      const res = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(range)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (res.ok) {
-        const json = await res.json();
-        return json.values || [];
-      }
-    } catch (e) {
-      console.warn(`Lỗi khi đọc phạm vi ${range}:`, e);
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(range)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('Phiên đăng nhập Google đã hết hạn hoặc không có quyền truy cập bảng tính.');
     }
-    return [];
+    if (!res.ok) {
+      if (res.status === 400 || res.status === 404) {
+        return [];
+      }
+      throw new Error(`Không thể đọc dữ liệu Google Sheets (${res.status}).`);
+    }
+    const json = await res.json();
+    return json.values || [];
   };
 
   // 1. Đọc sheet cài đặt hệ thống (HeThong_CaiDat hoặc CaiDat_HeThong)
@@ -2061,32 +2111,62 @@ export const importFullDataFromGoogleSheets = async (
 
   // 9. Đọc Đăng Ký Ăn Ca (DangKy_AnCa)
   try {
-    const mealRows = await fetchValues('DangKy_AnCa!A2:O500');
-    if (mealRows.length > 0) {
+    const rawMealRows = await fetchValues('DangKy_AnCa!A1:O2000');
+    if (rawMealRows.length > 0) {
+      const mealFirst = rawMealRows[0].map(c => String(c || '').trim().toLowerCase());
+      const mealHasHeader = mealFirst.some(c => c.includes('mã nv') || c.includes('họ và tên') || c.includes('hình thức ăn ca'));
+      const mealRows = mealHasHeader ? rawMealRows.slice(1) : rawMealRows;
       result.mealRegistrations = mealRows
         .filter(r => r && r[0])
-        .map((r, idx) => {
+        .map((r, idx): MealRegistration | null => {
           const empCode = String(r[0]).trim().toLowerCase();
-          const empId = codeToEmpId.get(empCode) || result.employees?.[idx]?.id || '';
+          const empId = codeToEmpId.get(empCode) || '';
+          if (!empId) return null;
+
           const planLabel = String(r[3] || '').toLowerCase();
-          const planType = planLabel.includes('bếp') ? 'registered' : planLabel.includes('tiền') ? 'cash' : 'none';
-          const mealType = planType === 'registered' ? 'canteen' : planType === 'cash' ? 'cash' : 'none';
-          const cashMethod: 'fixed' | 'by_attendance' = (planLabel.includes('chấm công') || planLabel.includes('bữa thực tế')) ? 'by_attendance' : 'fixed';
+          const planType: MealRegistration['planType'] = planLabel.includes('bếp')
+            ? 'registered'
+            : planLabel.includes('tiền')
+              ? 'cash'
+              : 'none';
+          const mealType: MealRegistration['mealType'] = planType === 'registered'
+            ? 'canteen'
+            : planType === 'cash'
+              ? 'cash'
+              : 'none';
+          const cashMethod: 'fixed' | 'by_attendance' = (planLabel.includes('chấm công') || planLabel.includes('bữa thực tế'))
+            ? 'by_attendance'
+            : 'fixed';
 
           // r[4]: ĐK Ăn Trưa, r[5]: ĐK Ăn Chiều, r[6]: ĐK Ăn Tối
-          const isLunch = r[4] !== undefined ? !String(r[4]).toLowerCase().includes('không') : true;
+          const isLunch = r[4] !== undefined && String(r[4]).trim() !== ''
+            ? !String(r[4]).toLowerCase().includes('không')
+            : true;
           const isAfternoon = r[5] !== undefined ? String(r[5]).toLowerCase().includes('có') : false;
           const isDinner = r[6] !== undefined ? String(r[6]).toLowerCase().includes('có') : false;
 
-          const rateVal = Number(String(r[11] || r[5] || '0').replace(/[^\d.-]/g, '')) || result.settings?.standardMealPerDay || 35000;
-          const flatVal = Number(String(r[12] || r[6] || '0').replace(/[^\d.-]/g, '')) || result.settings?.monthlyMealFlatRate || 1200000;
-          const noteVal = String(r[13] || r[7] || '').trim();
+          const parsedRate = r[11] !== undefined && String(r[11]).trim() !== ''
+            ? Number(String(r[11]).replace(/[^\d.-]/g, ''))
+            : NaN;
+          const rateVal = !isNaN(parsedRate) && parsedRate > 0
+            ? parsedRate
+            : (result.settings?.standardMealPerDay || 35000);
+
+          const parsedFlat = r[12] !== undefined && String(r[12]).trim() !== ''
+            ? Number(String(r[12]).replace(/[^\d.-]/g, ''))
+            : NaN;
+          const flatVal = planType === 'cash'
+            ? (!isNaN(parsedFlat) ? parsedFlat : (result.settings?.monthlyMealFlatRate || 1200000))
+            : (!isNaN(parsedFlat) ? parsedFlat : 0);
+
+          const noteVal = String(r[13] || '').trim();
           const idVal = r[14] ? String(r[14]).trim() : `meal-imp-${idx + 1}`;
+          const monthVal = String(r[2] || `${result.settings?.currentYear}-${String(result.settings?.currentMonth).padStart(2, '0')}`).trim();
 
           return {
             id: idVal,
             employeeId: empId,
-            month: String(r[2] || `${result.settings?.currentYear}-${String(result.settings?.currentMonth).padStart(2, '0')}`).trim(),
+            month: monthVal,
             planType,
             mealType,
             cashMethod,
@@ -2099,21 +2179,24 @@ export const importFullDataFromGoogleSheets = async (
             monthlyFlatAmount: flatVal,
             note: noteVal
           };
-        });
+        })
+        .filter((item): item is MealRegistration => item !== null);
     }
   } catch (err) {
+    if (err instanceof Error && err.message.includes('hết hạn')) throw err;
     console.warn('Lỗi đọc DangKy_AnCa:', err);
   }
 
   // 10. Đọc Phụ Cấp Đặc Thù (PhuCap_DacThu)
   try {
-    const allowRows = await fetchValues('PhuCap_DacThu!A2:I500');
+    const allowRows = await fetchValues('PhuCap_DacThu!A2:I2000');
     if (allowRows.length > 0) {
       result.specialAllowances = allowRows
         .filter(r => r && r[0] && r[4])
-        .map((r, idx) => {
+        .map((r, idx): SpecialAllowance | null => {
           const empCode = String(r[0]).trim().toLowerCase();
-          const empId = codeToEmpId.get(empCode) || result.employees?.[0]?.id || '';
+          const empId = codeToEmpId.get(empCode) || '';
+          if (!empId) return null;
           return {
             id: r[8] ? String(r[8]).trim() : `allow-imp-${idx + 1}`,
             employeeId: empId,
@@ -2124,58 +2207,100 @@ export const importFullDataFromGoogleSheets = async (
             isTaxable: !String(r[6] || '').toUpperCase().includes('MIỄN THUẾ'),
             note: String(r[7] || '').trim()
           };
-        });
+        })
+        .filter((item): item is SpecialAllowance => item !== null);
     }
   } catch (err) {
+    if (err instanceof Error && err.message.includes('hết hạn')) throw err;
     console.warn('Lỗi đọc PhuCap_DacThu:', err);
   }
 
   // 11. Đọc Bảng Chấm Công (Bang_ChamCong)
   try {
-    const tkRows = await fetchValues('Bang_ChamCong!A2:AT500');
-    if (tkRows.length > 0) {
+    const rawTkRows = await fetchValues('Bang_ChamCong!A1:AT2000');
+    if (rawTkRows.length > 0) {
+      const tkFirst = rawTkRows[0].map(c => String(c || '').trim().toLowerCase());
+      const tkHasHeader = tkFirst.some(c => c.includes('mã nv') || c.includes('họ và tên') || c.includes('công thực tế'));
+      const tkRows = tkHasHeader ? rawTkRows.slice(1) : rawTkRows;
       result.timekeepings = tkRows
         .filter(r => r && r[0])
-        .map((r, idx) => {
+        .map((r, idx): TimekeepingRecord | null => {
           const empCode = String(r[0]).trim().toLowerCase();
-          const empId = codeToEmpId.get(empCode) || result.employees?.[idx]?.id || '';
-          const month = String(r[4] || `${result.settings?.currentYear}-${String(result.settings?.currentMonth).padStart(2, '0')}`).trim();
+          const empId = codeToEmpId.get(empCode) || '';
+          if (!empId) return null;
 
-          const days: Record<number, any> = {};
-          for (let d = 1; d <= 31; d++) {
-            const sym = String(r[4 + d] || '').trim();
-            if (sym) {
-              days[d] = {
-                day: d,
-                symbol: sym as any,
-                workHours: sym === '+' ? 8 : sym === '1/2' ? 4 : 0,
-                otNormalHours: 0,
-                otWeekendHours: 0,
-                otHolidayHours: 0,
-                isHadMeal: sym === '+'
-              };
+          const month = String(r[4] || `${result.settings?.currentYear}-${String(result.settings?.currentMonth).padStart(2, '0')}`).trim();
+          const yearFromMonth = month.includes('-') ? Number(month.split('-')[0]) : undefined;
+
+          // Thử khôi phục đầy đủ từ cột JSON chi tiết (cột AT - index 45)
+          let parsedDetail: any = null;
+          if (r[45] && typeof r[45] === 'string' && r[45].trim().startsWith('{')) {
+            try {
+              parsedDetail = JSON.parse(r[45]);
+            } catch (_) {
+              parsedDetail = null;
             }
           }
 
+          const days: Record<number, any> = {};
+          if (parsedDetail && parsedDetail.days && typeof parsedDetail.days === 'object') {
+            Object.entries(parsedDetail.days).forEach(([k, val]) => {
+              const dayNum = Number(k);
+              if (dayNum >= 1 && dayNum <= 31 && val && typeof val === 'object') {
+                days[dayNum] = val;
+              }
+            });
+          } else {
+            for (let d = 1; d <= 31; d++) {
+              const sym = String(r[4 + d] || '').trim();
+              if (sym) {
+                const isFullWork = sym === 'X' || sym === 'CT' || sym === '+';
+                const isHalfWork = sym === 'X/2' || sym === '1/2';
+                days[d] = {
+                  symbol: (sym === '+' ? 'X' : sym === '1/2' ? 'X/2' : sym) as any,
+                  hours: isFullWork ? (result.settings?.standardWorkHoursPerDay || 8) : isHalfWork ? 4 : 0,
+                  otNormalHours: 0,
+                  otWeekendHours: 0,
+                  otHolidayHours: 0,
+                  hadMeal: isFullWork,
+                  mealLunch: isFullWork
+                };
+              }
+            }
+          }
+
+          const actualWorkDays = Number(r[36]) || 0;
+          const paidLeaveDays = Number(r[37]) || 0;
+          const holidayDays = Number(r[38]) || 0;
+          const insuranceLeaveDays = Number(r[39]) || 0;
+          const unpaidLeaveDays = Number(r[40]) || 0;
+
           return {
-            id: `tk-imp-${idx + 1}`,
+            id: parsedDetail?.id ? String(parsedDetail.id) : `tk-${empId}-${month}-${idx + 1}`,
             employeeId: empId,
+            year: parsedDetail?.year || yearFromMonth || result.settings?.currentYear,
             month,
             days,
-            actualWorkDays: Number(r[36]) || 0,
-            paidLeaveDays: Number(r[37]) || 0,
-            holidayDays: Number(r[38]) || 0,
-            insuranceLeaveDays: Number(r[39]) || 0,
-            unpaidLeaveDays: Number(r[40]) || 0,
-            totalPaidDays: (Number(r[36]) || 0) + (Number(r[37]) || 0) + (Number(r[38]) || 0),
+            actualWorkDays,
+            paidLeaveDays,
+            holidayDays,
+            insuranceLeaveDays,
+            unpaidLeaveDays,
+            totalPaidDays: parsedDetail?.totalPaidDays ?? (actualWorkDays + paidLeaveDays + holidayDays),
             totalOtNormalHours: Number(r[41]) || 0,
             totalOtWeekendHours: Number(r[42]) || 0,
             totalOtHolidayHours: Number(r[43]) || 0,
-            totalMeals: Number(r[44]) || 0
+            totalMeals: Number(r[44]) || 0,
+            totalMealsLunch: parsedDetail?.totalMealsLunch ?? 0,
+            totalMealsAfternoon: parsedDetail?.totalMealsAfternoon ?? 0,
+            totalMealsDinner: parsedDetail?.totalMealsDinner ?? 0,
+            totalActualWorkHours: parsedDetail?.totalActualWorkHours ?? 0
           };
-        });
+        })
+        .filter((item): item is TimekeepingRecord => item !== null);
     }
   } catch (err) {
+    if (err instanceof Error && err.message.includes('hết hạn')) throw err;
     console.warn('Lỗi đọc Bang_ChamCong:', err);
   }
 

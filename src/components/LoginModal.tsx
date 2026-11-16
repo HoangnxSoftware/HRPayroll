@@ -181,6 +181,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     return null;
   });
 
+  // Đồng bộ lại thông tin bảng tính đang kết nối mỗi khi mở lại cửa sổ đăng nhập (tránh state cũ từ lần trước gây nhận nhầm Demo Mode)
+  useEffect(() => {
+    if (!isOpen) return;
+    const isCurrentlyDemo = syncState.isDemoMode === true || localStorage.getItem('payroll_is_demo_mode') === 'true';
+    const currentSavedDb = getSavedDatabaseInfo();
+    if (!isCurrentlyDemo) {
+      if (syncState.spreadsheetId) {
+        setSelectedFileId(syncState.spreadsheetId);
+        setSelectedFileName(syncState.spreadsheetName || currentSavedDb?.name || 'Bảng tính Google Sheets');
+        setSelectedFileUrl(syncState.spreadsheetUrl || currentSavedDb?.url || `https://docs.google.com/spreadsheets/d/${syncState.spreadsheetId}/edit`);
+      } else if (currentSavedDb?.id) {
+        setSelectedFileId(currentSavedDb.id);
+        setSelectedFileName(currentSavedDb.name);
+        setSelectedFileUrl(currentSavedDb.url);
+      }
+    } else if (!selectedFileId && !syncState.spreadsheetId) {
+      setSelectedFileId(null);
+      setSelectedFileName(null);
+      setSelectedFileUrl(null);
+    }
+  }, [isOpen, syncState.spreadsheetId, syncState.spreadsheetName, syncState.spreadsheetUrl, syncState.isDemoMode]);
+
   // Mode for new company creation
   const [showCreateCompanyForm, setShowCreateCompanyForm] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState('');
@@ -458,17 +480,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }));
 
       // If a Google sheet is selected and user is connected, load latest data and system settings upon login
-      if (syncState.isConnected && selectedFileId && !isPendingNewCompany && onLoadDataFromSpreadsheet && hasValidGoogleToken()) {
+      const targetSheetId = selectedFileId || syncState.spreadsheetId;
+      const targetSheetName = selectedFileName || syncState.spreadsheetName;
+      if (syncState.isConnected && targetSheetId && !isPendingNewCompany && onLoadDataFromSpreadsheet && hasValidGoogleToken()) {
         try {
-          await onLoadDataFromSpreadsheet(selectedFileId, selectedFileName || undefined);
+          await onLoadDataFromSpreadsheet(targetSheetId, targetSheetName || undefined);
         } catch (err) {
           console.warn('Lỗi nạp Google Sheet trước khi đăng nhập:', err);
         }
       }
 
       // Lưu lại đường dẫn file cơ sở dữ liệu đã kết nối thành công để phục vụ các lần tiếp theo
-      const activeId = selectedFileId || syncState.spreadsheetId;
-      const activeName = selectedFileName || syncState.spreadsheetName;
+      const activeId = targetSheetId;
+      const activeName = targetSheetName;
       const activeUrl = selectedFileUrl || syncState.spreadsheetUrl || (activeId ? `https://docs.google.com/spreadsheets/d/${activeId}/edit` : null);
       if (activeId && activeUrl) {
         saveDatabaseConnectionToStorage({ id: activeId, name: activeName, url: activeUrl });
@@ -481,6 +505,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
+    setIsPendingNewCompany(null);
+    setNewCompanySuccessNotice(null);
     setPassword('');
     setSuccessMessage(
       isDemo 

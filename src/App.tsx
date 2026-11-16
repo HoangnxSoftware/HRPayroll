@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   INITIAL_SETTINGS, 
   INITIAL_EMPLOYEES, 
@@ -498,10 +498,14 @@ function PayrollAppContent() {
     }
   };
 
-  // Tự động đồng bộ từ Google Sheets nếu đã kết nối trước đó (chỉ chạy khi đã đăng nhập Google hợp lệ và không ở chế độ dữ liệu mẫu)
+  // Tự động đồng bộ từ Google Sheets tối đa 1 lần khi mới khởi động ứng dụng
+  // (Tránh ghi đè dữ liệu đang nhập khi người dùng mới xác thực lại Google hoặc vừa tạo bảng tính trong phiên làm việc)
+  const hasAutoLoadedOnStartupRef = useRef(false);
   useEffect(() => {
+    if (hasAutoLoadedOnStartupRef.current) return;
     const isDemo = syncState.isDemoMode || localStorage.getItem('payroll_is_demo_mode') === 'true';
     if (!isDemo && syncState.isConnected && syncState.spreadsheetId) {
+      hasAutoLoadedOnStartupRef.current = true;
       if (!hasValidGoogleToken()) {
         setSyncState(prev => ({
           ...prev,

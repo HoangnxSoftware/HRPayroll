@@ -43,7 +43,7 @@ export const LogoutSyncConfirmModal: React.FC<LogoutSyncConfirmModalProps> = ({
 
   if (!isOpen) return null;
 
-  const isDemo = Boolean(syncState.isDemoMode);
+  const isDemo = Boolean(syncState.isDemoMode) || localStorage.getItem('payroll_is_demo_mode') === 'true';
 
   const handleSyncAndLogout = async () => {
     if (isDemo) {
@@ -74,8 +74,10 @@ export const LogoutSyncConfirmModal: React.FC<LogoutSyncConfirmModalProps> = ({
         sheetUrl = created.url;
         sheetName = title;
 
+        localStorage.setItem('payroll_is_demo_mode', 'false');
         setSyncState(prev => ({
           ...prev,
+          isDemoMode: false,
           spreadsheetId: sheetId,
           spreadsheetUrl: sheetUrl,
           spreadsheetName: sheetName,
@@ -96,8 +98,10 @@ export const LogoutSyncConfirmModal: React.FC<LogoutSyncConfirmModalProps> = ({
       const res = await exportDataToGoogleSheets(sheetId, payrollData);
 
       const nowStr = new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN');
+      localStorage.setItem('payroll_is_demo_mode', 'false');
       setSyncState(prev => ({
         ...prev,
+        isDemoMode: false,
         isConnected: true,
         lastSyncTime: nowStr,
         syncSuccess: true,

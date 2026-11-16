@@ -31,6 +31,7 @@ import {
   checkLegalInfoMismatch,
   SpreadsheetLegalInfo
 } from '../services/googleSheetsService';
+import { saveDatabaseConnectionToStorage } from './LoginModal';
 
 interface GoogleSyncModalProps {
   isOpen: boolean;
@@ -133,8 +134,11 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
     try {
       const title = `Bảng Lương & Nhân Sự - ${payrollData.settings.companyName || 'Công Ty'}`;
       const sheet = await getOrCreateSpreadsheet(title);
+      localStorage.setItem('payroll_is_demo_mode', 'false');
+      saveDatabaseConnectionToStorage({ id: sheet.id, name: title, url: sheet.url });
       setSyncState(prev => ({
         ...prev,
+        isDemoMode: false,
         spreadsheetId: sheet.id,
         spreadsheetName: title,
         spreadsheetUrl: sheet.url,
@@ -168,8 +172,15 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
       try {
         const res = await exportDataToGoogleSheets(syncState.spreadsheetId!, payrollData);
         const nowStr = new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN');
+        localStorage.setItem('payroll_is_demo_mode', 'false');
+        saveDatabaseConnectionToStorage({
+          id: syncState.spreadsheetId!,
+          name: syncState.spreadsheetName || `Bảng Lương & Nhân Sự - ${payrollData.settings.companyName || 'Công Ty'}`,
+          url: syncState.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${syncState.spreadsheetId}/edit`
+        });
         setSyncState(prev => ({
           ...prev,
+          isDemoMode: false,
           lastSyncTime: nowStr,
           syncSuccess: true,
           syncMessage: `Đã đồng bộ ${res.totalUpdatedCells} ô dữ liệu vào ${nowStr}`
