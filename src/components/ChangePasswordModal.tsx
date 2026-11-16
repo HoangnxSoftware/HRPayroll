@@ -89,12 +89,15 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-3.5 text-xs">
+        <form onSubmit={handleSubmit} autoComplete="off" className="mt-4 space-y-3.5 text-xs">
           <div>
             <label className="block font-semibold text-slate-700 mb-1">Mật khẩu hiện tại *</label>
             <input
               type={showPassword ? 'text' : 'password'}
               required
+              autoComplete="off"
+              data-lpignore="true"
+              data-form-type="other"
               placeholder="Nhập mật khẩu hiện tại"
               value={oldPassword}
               onChange={e => setOldPassword(e.target.value)}
@@ -107,6 +110,9 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen
             <input
               type={showPassword ? 'text' : 'password'}
               required
+              autoComplete="off"
+              data-lpignore="true"
+              data-form-type="other"
               placeholder="Nhập mật khẩu mới"
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
@@ -119,6 +125,9 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen
             <input
               type={showPassword ? 'text' : 'password'}
               required
+              autoComplete="off"
+              data-lpignore="true"
+              data-form-type="other"
               placeholder="Nhập lại mật khẩu mới"
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}

@@ -137,12 +137,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showForgotPasswordConfirmModal, setShowForgotPasswordConfirmModal] = useState(false);
   const [showForgotPasswordNoticeModal, setShowForgotPasswordNoticeModal] = useState(false);
+  const [isPasswordUnlocked, setIsPasswordUnlocked] = useState(false);
 
   // Luôn xóa trắng ô mật khẩu khi mở cửa sổ đăng nhập (không tự điền mật khẩu mặc định)
   useEffect(() => {
     if (isOpen) {
       setPassword('');
       setShowPassword(false);
+      setIsPasswordUnlocked(false);
       setErrorMessage(null);
       setShowForgotPasswordConfirmModal(false);
       setShowForgotPasswordNoticeModal(false);
@@ -909,7 +911,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             )}
 
             {/* Login Form */}
-            <form onSubmit={handleLoginSubmit} className="space-y-3.5">
+            <form onSubmit={handleLoginSubmit} autoComplete="off" className="space-y-3.5">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-slate-500" />
@@ -917,7 +919,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </label>
                 <input
                   type="text"
+                  name="payroll_account_name"
                   required
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
                   placeholder="admin, ketoantruong, nhanvien..."
                   value={username}
                   onChange={e => setUsername(e.target.value)}
@@ -944,8 +950,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
+                    name="payroll_access_secret"
                     required
-                    autoComplete="new-password"
+                    readOnly={!isPasswordUnlocked}
+                    onPointerDown={() => setIsPasswordUnlocked(true)}
+                    onFocus={() => setIsPasswordUnlocked(true)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
                     placeholder="Nhập mật khẩu tài khoản..."
                     value={password}
                     onChange={e => setPassword(e.target.value)}

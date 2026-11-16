@@ -770,7 +770,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
                     isChangingAdminPassword ? (
                       <input
                         type="password"
-                        autoComplete="new-password"
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-form-type="other"
                         placeholder="Nhập mật khẩu mới..."
                         value={formData.password}
                         onChange={e => setFormData({ ...formData, password: e.target.value })}
@@ -937,7 +939,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ employee
                 <label className="block text-xs font-bold text-slate-700 mb-1">Mật khẩu mới:</label>
                 <input
                   type={isAdminAccount(resetPwdModal.user) ? 'password' : 'text'}
-                  autoComplete="new-password"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
                   value={resetPwdModal.newPassword}
                   onChange={e => setResetPwdModal(prev => ({ ...prev, newPassword: e.target.value }))}
                   required
