@@ -65,13 +65,15 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
   onNavigateToAnnual,
   onReorderEmployees
 }) => {
-  const { canApprovePayroll, canExportData, canEditEmployees, currentUserRole, selectedEmployeeIdForSelf } = useAuthRole();
+  const { canApprovePayroll, canEditPayroll, canExportData, canEditEmployees, currentUserRole, selectedEmployeeIdForSelf } = useAuthRole();
+  const canModifyAdvance = canApprovePayroll || canEditPayroll;
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [sortField, setSortField] = useState<PayrollSortField>('default_employee_order');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [advanceModal, setAdvanceModal] = useState<{ id: string; name: string; amount: number } | null>(null);
+  const [advanceModal, setAdvanceModal] = useState<{ id: string; name: string; amount: string } | null>(null);
+  const [editingAdvance, setEditingAdvance] = useState<{ id: string; rawValue: string } | null>(null);
   const [selectedEmpIds, setSelectedEmpIds] = useState<Set<string>>(new Set());
 
   const empMap = new Map((employees || []).map(e => [e.id, e]));
@@ -187,8 +189,15 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
 
   const handleSaveAdvance = () => {
     if (!advanceModal) return;
-    onUpdateAdvancePayment(advanceModal.id, advanceModal.amount);
+    const numericVal = Math.max(0, Number(String(advanceModal.amount).replace(/[^\d]/g, '')) || 0);
+    onUpdateAdvancePayment(advanceModal.id, numericVal);
     setAdvanceModal(null);
+  };
+
+  const handleCommitInlineAdvance = (payrollId: string, rawVal: string) => {
+    const numericVal = Math.max(0, Number(String(rawVal).replace(/[^\d]/g, '')) || 0);
+    onUpdateAdvancePayment(payrollId, numericVal);
+    setEditingAdvance(null);
   };
 
   return (
@@ -650,13 +659,48 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
                         {p.personalIncomeTax > 0 ? `-${formatVND(p.personalIncomeTax)}` : '0 đ'}
                       </td>
                       <td className="px-3 py-3 text-right font-mono">
-                        {canApprovePayroll ? (
-                          <button
-                            onClick={() => setAdvanceModal({ id: p.id, name: emp?.fullName || '', amount: p.advancePayment })}
-                            className="text-blue-600 hover:underline cursor-pointer"
-                          >
-                            {p.advancePayment > 0 ? `-${formatVND(p.advancePayment)}` : '0 đ'}
-                          </button>
+                        {canModifyAdvance ? (
+                          editingAdvance?.id === p.id ? (
+                            <div className="flex items-center justify-end gap-1">
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                autoFocus
+                                value={editingAdvance.rawValue}
+                                onFocus={e => e.target.select()}
+                                onChange={e => {
+                                  const digitsOnly = e.target.value.replace(/[^\d]/g, '');
+                                  setEditingAdvance({ id: p.id, rawValue: digitsOnly });
+                                }}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleCommitInlineAdvance(p.id, editingAdvance.rawValue);
+                                  } else if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingAdvance(null);
+                                  }
+                                }}
+                                onBlur={() => handleCommitInlineAdvance(p.id, editingAdvance.rawValue)}
+                                placeholder="Nhập số tiền..."
+                                className="w-28 px-2 py-1 border border-blue-500 rounded-md text-right font-mono font-bold text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditingAdvance({
+                                  id: p.id,
+                                  rawValue: p.advancePayment > 0 ? String(p.advancePayment) : ''
+                                })
+                              }
+                              title="Nhấp để nhập số tiền tạm ứng"
+                              className="inline-flex items-center justify-end gap-1 px-2 py-1 rounded-md border border-dashed border-blue-300 bg-blue-50/50 hover:bg-blue-100/70 text-blue-700 font-semibold cursor-pointer transition-colors"
+                            >
+                              <span>{p.advancePayment > 0 ? `-${formatVND(p.advancePayment)}` : '0 đ'}</span>
+                            </button>
+                          )
                         ) : (
                           p.advancePayment > 0 ? `-${formatVND(p.advancePayment)}` : '-'
                         )}
@@ -718,10 +762,10 @@ export const PayrollView: React.FC<PayrollViewProps> = ({
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Số tiền đã tạm ứng (VNĐ):</label>
               <input
-                type="number"
-                step={100000}
+                type="text"
+                inputMode="numeric"
                 value={advanceModal.amount}
-                onChange={e => setAdvanceModal({ ...advanceModal, amount: Number(e.target.value) })}
+                onChange={e => setAdvanceModal({ ...advanceModal, amount: e.target.value.replace(/[^\d]/g, '') })}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold text-slate-900"
               />
             </div>

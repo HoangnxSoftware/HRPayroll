@@ -730,25 +730,47 @@ function PayrollAppContent() {
   const handleUpdateAdvancePayment = (payrollId: string, amount: number) => {
     const p = payrolls.find(item => item.id === payrollId);
     if (!p) return;
-    // Update allowance with negative or advance
     const empId = p.employeeId;
-    const existingAdvance = specialAllowances.find(a => a.employeeId === empId && a.name.includes('Tạm ứng'));
-    if (existingAdvance) {
-      setSpecialAllowances(prev => prev.map(a => a.id === existingAdvance.id ? { ...a, amount } : a));
-    } else {
-      setSpecialAllowances(prev => [
+    const currentMonthKey = `${settings.currentYear}-${String(settings.currentMonth).padStart(2, '0')}`;
+    const cleanAmount = Math.max(0, Number(amount) || 0);
+
+    setSpecialAllowances(prev => {
+      const existingIdx = prev.findIndex(
+        a =>
+          a.employeeId === empId &&
+          ((a.id && a.id.startsWith('adv-')) || (a.name || '').toLowerCase().includes('tạm ứng')) &&
+          (a.month === currentMonthKey || !a.month)
+      );
+
+      if (existingIdx >= 0) {
+        if (cleanAmount === 0) {
+          return prev.filter((_, i) => i !== existingIdx);
+        }
+        const copy = [...prev];
+        copy[existingIdx] = {
+          ...copy[existingIdx],
+          month: currentMonthKey,
+          amount: cleanAmount,
+          isTaxable: false
+        };
+        return copy;
+      }
+
+      if (cleanAmount === 0) return prev;
+      return [
         ...prev,
         {
-          id: `adv-${Date.now()}`,
+          id: `adv-${empId}-${currentMonthKey}-${Date.now()}`,
           employeeId: empId,
+          allowanceType: 'other',
           name: 'Tạm ứng lương trong tháng',
-          amount: amount,
+          amount: cleanAmount,
           isTaxable: false,
-          month: `${settings.currentYear}-${String(settings.currentMonth).padStart(2, '0')}`,
+          month: currentMonthKey,
           note: 'Khấu trừ vào kỳ chi trả'
         }
-      ]);
-    }
+      ];
+    });
   };
 
   const handleOpenPrintSlip = (empId?: string, empIds?: string[]) => {

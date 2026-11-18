@@ -60,12 +60,14 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<SpecialAllowance | null>(null);
+  const [empSearchQuery, setEmpSearchQuery] = useState('');
+  const [isEmpSearchOpen, setIsEmpSearchOpen] = useState(false);
   const [importNotification, setImportNotification] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const defaultMonth = `${settings?.currentYear || 2026}-${String(settings?.currentMonth || 9).padStart(2, '0')}`;
 
   const [formData, setFormData] = useState<Partial<SpecialAllowance>>({
-    employeeId: employees[0]?.id || '',
+    employeeId: '',
     name: 'Phụ cấp trách nhiệm',
     amount: 1000000,
     isTaxable: true,
@@ -74,6 +76,21 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
   });
 
   const empMap = new Map(employees.map(e => [e.id, e]));
+  const depMap = React.useMemo(
+    () => new Map((settings?.departments || []).map(d => [d.id, d.name])),
+    [settings?.departments]
+  );
+
+  const matchingEmployees = React.useMemo(() => {
+    const q = empSearchQuery.trim().toLowerCase();
+    if (!q) return employees;
+    return employees.filter(e =>
+      e.fullName.toLowerCase().includes(q) ||
+      e.employeeCode.toLowerCase().includes(q) ||
+      (e.idCardNumber && e.idCardNumber.toLowerCase().includes(q)) ||
+      (depMap.get(e.departmentId) || '').toLowerCase().includes(q)
+    );
+  }, [employees, empSearchQuery, depMap]);
 
   const baseFilteredAllowances = specialAllowances.filter(a => {
     const emp = empMap.get(a.employeeId);
@@ -123,9 +140,11 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
 
   const handleOpenAdd = () => {
     setEditingItem(null);
+    setEmpSearchQuery('');
+    setIsEmpSearchOpen(false);
     setFormData({
       id: `allow-${Date.now()}`,
-      employeeId: employees[0]?.id || '',
+      employeeId: '',
       name: 'Phụ cấp trách nhiệm',
       amount: 1000000,
       isTaxable: true,
@@ -137,13 +156,19 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
 
   const handleOpenEdit = (item: SpecialAllowance) => {
     setEditingItem(item);
+    setEmpSearchQuery('');
+    setIsEmpSearchOpen(false);
     setFormData(item);
     setIsModalOpen(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.employeeId || !formData.name || !formData.amount) {
+    if (!formData.employeeId) {
+      alert('Vui lòng tìm và chọn Nhân Viên Hưởng!');
+      return;
+    }
+    if (!formData.name || !formData.amount) {
       alert('Vui lòng điền đầy đủ các thông tin bắt buộc');
       return;
     }
@@ -561,17 +586,94 @@ export const AllowancesView: React.FC<AllowancesViewProps> = ({
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Nhân Viên Hưởng *</label>
-                <select
-                  required
-                  value={formData.employeeId}
-                  onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg font-medium"
-                >
-                  {employees.map(e => (
-                    <option key={e.id} value={e.id}>{e.employeeCode} - {e.fullName}</option>
-                  ))}
-                </select>
+                <label className="block font-semibold text-slate-700 mb-1">Nhân Viên Được Hưởng *</label>
+                {formData.employeeId && empMap.get(formData.employeeId) ? (
+                  <div className="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-300 rounded-xl">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white font-bold flex items-center justify-center text-xs shadow-xs">
+                        {empMap.get(formData.employeeId)?.fullName.slice(0, 1) || 'NV'}
+                      </div>
+                      <div>
+                        <div className="font-bold text-slate-900 text-xs flex items-center gap-2">
+                          <span>{empMap.get(formData.employeeId)?.fullName}</span>
+                          <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-emerald-200/80 text-emerald-950 font-bold">
+                            {empMap.get(formData.employeeId)?.employeeCode}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-600 font-mono mt-0.5">
+                          Số CCCD: <strong className="text-slate-800">{empMap.get(formData.employeeId)?.idCardNumber || 'Chưa cập nhật'}</strong>
+                          {empMap.get(formData.employeeId)?.departmentId && ` • Phòng ban: ${depMap.get(empMap.get(formData.employeeId)!.departmentId) || ''}`}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData({ ...formData, employeeId: '' });
+                        setEmpSearchQuery('');
+                        setIsEmpSearchOpen(true);
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-white hover:bg-emerald-100 border border-emerald-300 rounded-lg cursor-pointer transition-colors shadow-2xs"
+                    >
+                      Đổi Nhân Viên
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        placeholder="Tìm theo Tên NV, Số CCCD hoặc Mã NV..."
+                        value={empSearchQuery}
+                        onFocus={() => setIsEmpSearchOpen(true)}
+                        onChange={e => {
+                          setEmpSearchQuery(e.target.value);
+                          setIsEmpSearchOpen(true);
+                        }}
+                        className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg font-medium text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {isEmpSearchOpen && (
+                      <div className="absolute z-30 top-full left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl divide-y divide-slate-100">
+                        {matchingEmployees.length === 0 ? (
+                          <div className="p-3 text-center text-slate-400 text-xs">
+                            Không tìm thấy nhân viên nào phù hợp
+                          </div>
+                        ) : (
+                          matchingEmployees.map(e => (
+                            <div
+                              key={e.id}
+                              onClick={() => {
+                                setFormData({ ...formData, employeeId: e.id });
+                                setIsEmpSearchOpen(false);
+                                setEmpSearchQuery('');
+                              }}
+                              className="p-2.5 hover:bg-emerald-50/80 cursor-pointer transition-colors flex items-center justify-between text-xs"
+                            >
+                              <div>
+                                <div className="font-bold text-slate-900">
+                                  {e.fullName}
+                                  <span className="ml-2 font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
+                                    {e.employeeCode}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                  CCCD: <strong className="text-slate-800">{e.idCardNumber || '—'}</strong>
+                                  {e.departmentId && ` • ${depMap.get(e.departmentId) || ''}`}
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-lg">
+                                Chọn
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>

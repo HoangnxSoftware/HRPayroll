@@ -939,6 +939,14 @@ export const calculateEmployeePayroll = (
     ? effHourlyRate
     : (effSalaryBasis === 'hourly' ? (effBaseSalary > 0 ? effBaseSalary : standardHourlyRate) : standardHourlyRate);
 
+  // Trích xuất khoản tạm ứng lương trong tháng từ danh sách phụ cấp/khấu trừ (nếu có)
+  allowances.forEach(alw => {
+    const nameLower = (alw.name || '').toLowerCase();
+    if ((alw.id && alw.id.startsWith('adv-')) || nameLower.includes('tạm ứng')) {
+      advanceAmount += Number(alw.amount) || 0;
+    }
+  });
+
   // Nếu tháng chưa được chấm công, chưa được cập nhật bảng chấm công:
   // Không tự động tính toán lương, phụ cấp, bảo hiểm và thuế TNCN (trả về 0)
   if (!monthIsRecorded) {
@@ -1129,6 +1137,10 @@ export const calculateEmployeePayroll = (
   
   allowances.forEach(alw => {
     const nameLower = (alw.name || '').toLowerCase();
+    if ((alw.id && alw.id.startsWith('adv-')) || nameLower.includes('tạm ứng')) {
+      // Khoản tạm ứng đã được tính vào advanceAmount để khấu trừ vào thực lĩnh, không cộng vào thu nhập Gross
+      return;
+    }
     const isUniform = alw.allowanceType === 'uniform' || nameLower.includes('trang phục');
     const isPhone = alw.allowanceType === 'phone' || nameLower.includes('điện thoại') || nameLower.includes('liên lạc');
     const isTravel = alw.allowanceType === 'travel_gas' || nameLower.includes('xăng') || nameLower.includes('đi lại') || nameLower.includes('công tác');
