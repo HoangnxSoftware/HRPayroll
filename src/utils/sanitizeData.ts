@@ -49,6 +49,11 @@ export function sanitizeSettings(incoming?: Partial<SystemSettings> | null): Sys
     base.taxBrackets = INITIAL_SETTINGS.taxBrackets;
   }
 
+  // Đảm bảo danh mục các khoản phụ cấp đặc thù luôn là mảng hợp lệ
+  if (!Array.isArray(base.allowanceCatalog)) {
+    base.allowanceCatalog = INITIAL_SETTINGS.allowanceCatalog || [];
+  }
+
   // Đảm bảo monthlyStandardConfigs là object hợp lệ
   if (!base.monthlyStandardConfigs || typeof base.monthlyStandardConfigs !== 'object') {
     base.monthlyStandardConfigs = INITIAL_SETTINGS.monthlyStandardConfigs;

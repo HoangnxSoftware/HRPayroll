@@ -22,7 +22,14 @@ import {
 } from './types';
 import { calculateEmployeePayroll, isEmployeeActiveInMonth } from './utils/payrollCalculator';
 import { FullPayrollData, importFullDataFromGoogleSheets } from './services/googleSheetsService';
-import { getCurrentUser, hasValidGoogleToken } from './services/authService';
+import {
+  getCurrentUser,
+  hasValidGoogleToken,
+  googleSignIn,
+  getGoogleTokenRemainingMs,
+  GOOGLE_DRIVE_CONNECTION_LOST_EVENT
+} from './services/authService';
+import { CloudOff, WifiOff, AlertTriangle, RefreshCw, Link2, X } from 'lucide-react';
 import {
   sanitizeSettings,
   sanitizeEmployees,
@@ -316,17 +323,133 @@ function PayrollAppContent() {
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [employeeToEdit, setEmployeeToEdit] = useState<Employee | null>(null);
 
+  const isDemoMode = Boolean(syncState.isDemoMode) || localStorage.getItem('payroll_is_demo_mode') === 'true';
+  const [isNetworkOnline, setIsNetworkOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [driveConnectionAlert, setDriveConnectionAlert] = useState<{
+    type: 'expired' | 'interrupted';
+    reason: string;
+  } | null>(null);
+  const [tokenRemainingMs, setTokenRemainingMs] = useState<number>(() => getGoogleTokenRemainingMs());
+  const [isReconnectingDrive, setIsReconnectingDrive] = useState(false);
+  const [driveReconnectError, setDriveReconnectError] = useState<string | null>(null);
+  const [isDriveBannerDismissed, setIsDriveBannerDismissed] = useState(false);
+
   // Check existing Google Auth session on mount
   useEffect(() => {
     const user = getCurrentUser();
-    if (user) {
+    const validToken = hasValidGoogleToken();
+    setTokenRemainingMs(getGoogleTokenRemainingMs());
+    if (user && validToken) {
       setSyncState(prev => ({
         ...prev,
         isConnected: true,
         userEmail: user.email
       }));
+    } else if (!validToken) {
+      setSyncState(prev => (
+        prev.isConnected
+          ? {
+              ...prev,
+              isConnected: false,
+              syncMessage: 'Phiên kết nối Google Drive đã hết hạn hoặc chưa được cấp quyền.'
+            }
+          : prev
+      ));
     }
   }, []);
+
+  // Theo dõi liên tục trạng thái mạng, phiên token Google Drive và sự kiện mất kết nối khi đồng bộ
+  useEffect(() => {
+    const checkDriveStatus = () => {
+      const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      setIsNetworkOnline(online);
+      const remaining = getGoogleTokenRemainingMs();
+      setTokenRemainingMs(remaining);
+
+      if (isDemoMode) {
+        setDriveConnectionAlert(null);
+        setDriveReconnectError(null);
+        return;
+      }
+
+      if (syncState.isConnected && remaining <= 0) {
+        setSyncState(prev => (
+          prev.isConnected
+            ? {
+                ...prev,
+                isConnected: false,
+                syncMessage: 'Phiên kết nối Google Drive đã hết hạn. Vui lòng kết nối lại để tiếp tục đồng bộ.'
+              }
+            : prev
+        ));
+        setDriveConnectionAlert({
+          type: 'expired',
+          reason: 'Phiên đăng nhập Google Drive đã hết hạn (quá 55 phút). Vui lòng kết nối lại để việc đồng bộ được diễn ra liên tục.'
+        });
+        setIsDriveBannerDismissed(false);
+      } else if (online && remaining >= 5 * 60 * 1000 && syncState.isConnected && syncState.spreadsheetId) {
+        setDriveConnectionAlert(null);
+        setDriveReconnectError(null);
+      }
+    };
+
+    checkDriveStatus();
+    const intervalId = window.setInterval(checkDriveStatus, 15000);
+
+    const handleOnline = () => {
+      setIsNetworkOnline(true);
+      checkDriveStatus();
+    };
+
+    const handleOffline = () => {
+      setIsNetworkOnline(false);
+      setIsDriveBannerDismissed(false);
+      setDriveConnectionAlert({
+        type: 'interrupted',
+        reason: 'Mất kết nối mạng Internet. Kết nối Google Drive đang bị gián đoạn — vui lòng kiểm tra lại đường truyền để tiếp tục đồng bộ.'
+      });
+    };
+
+    const handleDriveLost = (ev: Event) => {
+      if (isDemoMode) return;
+      const detail = (ev as CustomEvent<{ type?: 'expired' | 'interrupted'; reason?: string }>).detail;
+      const alertType: 'expired' | 'interrupted' = detail?.type === 'expired' ? 'expired' : 'interrupted';
+      const reason = detail?.reason || 'Kết nối Google Drive bị gián đoạn hoặc đã hết phiên làm việc.';
+      if (alertType === 'expired') {
+        setSyncState(prev => ({
+          ...prev,
+          isConnected: false,
+          syncMessage: reason
+        }));
+      }
+      setTokenRemainingMs(getGoogleTokenRemainingMs());
+      setDriveConnectionAlert({ type: alertType, reason });
+      setIsDriveBannerDismissed(false);
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState !== 'hidden') {
+        checkDriveStatus();
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener(GOOGLE_DRIVE_CONNECTION_LOST_EVENT, handleDriveLost);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener(GOOGLE_DRIVE_CONNECTION_LOST_EVENT, handleDriveLost);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [isDemoMode, syncState.isConnected, syncState.spreadsheetId]);
 
   const normalizeMonthKey = (monthVal?: string | number, yearVal?: number) => {
     const str = String(monthVal || '');
@@ -670,6 +793,51 @@ function PayrollAppContent() {
   // Allowances CRUD
   const handleAddAllowance = (a: SpecialAllowance) => setSpecialAllowances(prev => [...prev, a]);
   const handleBatchAddAllowances = (newAllowances: SpecialAllowance[]) => setSpecialAllowances(prev => [...prev, ...newAllowances]);
+  const handleBatchUpsertAllowances = (
+    items: SpecialAllowance[],
+    mode: 'overwrite' | 'skip' | 'append' = 'overwrite'
+  ) => {
+    setSpecialAllowances(prev => {
+      if (mode === 'append') {
+        return [...prev, ...items];
+      }
+
+      const next = [...prev];
+      items.forEach(item => {
+        const normalizedName = (item.name || '').trim().toLowerCase();
+        const matchIdx = next.findIndex(existing => {
+          if ((existing.id && existing.id.startsWith('adv-')) || (existing.name || '').toLowerCase().includes('tạm ứng')) {
+            return false;
+          }
+          if (existing.employeeId !== item.employeeId || existing.month !== item.month) {
+            return false;
+          }
+          if (item.catalogId && existing.catalogId && existing.catalogId === item.catalogId) {
+            return true;
+          }
+          return (existing.name || '').trim().toLowerCase() === normalizedName;
+        });
+
+        if (matchIdx >= 0) {
+          if (mode === 'overwrite') {
+            next[matchIdx] = {
+              ...next[matchIdx],
+              allowanceType: item.allowanceType,
+              catalogId: item.catalogId ?? next[matchIdx].catalogId,
+              name: item.name,
+              amount: item.amount,
+              isTaxable: item.isTaxable,
+              note: item.note
+            };
+          }
+        } else {
+          next.push(item);
+        }
+      });
+
+      return next;
+    });
+  };
   const handleUpdateAllowance = (a: SpecialAllowance) => setSpecialAllowances(prev => prev.map(item => item.id === a.id ? a : item));
   const handleDeleteAllowance = (id: string) => {
     const item = specialAllowances.find(a => a.id === id);
@@ -773,11 +941,144 @@ function PayrollAppContent() {
     });
   };
 
+  const handleReconnectGoogleDrive = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setDriveReconnectError('Thiết bị đang ngoại tuyến. Vui lòng kiểm tra kết nối Internet trước khi kết nối lại Google Drive.');
+      return;
+    }
+    setIsReconnectingDrive(true);
+    setDriveReconnectError(null);
+    // Đảm bảo kết nối lại trong phiên làm việc không tự động tải đè dữ liệu đang sửa trên máy
+    hasAutoLoadedOnStartupRef.current = true;
+    try {
+      const res = await googleSignIn();
+      if (res) {
+        setTokenRemainingMs(getGoogleTokenRemainingMs());
+        setDriveConnectionAlert(null);
+        setIsDriveBannerDismissed(false);
+        setSyncState(prev => ({
+          ...prev,
+          isConnected: true,
+          userEmail: res.user.email,
+          syncMessage: 'Đã kết nối lại Google Drive thành công!'
+        }));
+        if (!syncState.spreadsheetId) {
+          setIsSyncModalOpen(true);
+        }
+      }
+    } catch (err: any) {
+      console.error('Lỗi kết nối lại Google Drive:', err);
+      setDriveReconnectError(
+        err?.code === 'auth/popup-closed-by-user'
+          ? 'Bạn đã đóng cửa sổ xác thực Google trước khi hoàn tất. Vui lòng bấm Kết nối lại để hoàn thành.'
+          : `Không thể kết nối lại Google Drive: ${err?.message || 'Vui lòng thử lại.'}`
+      );
+    } finally {
+      setIsReconnectingDrive(false);
+    }
+  }, [syncState.spreadsheetId]);
+
   const handleOpenPrintSlip = (empId?: string, empIds?: string[]) => {
     setSelectedSlipEmpId(empId);
     setSelectedSlipEmpIds(empIds);
     setIsPrintSlipOpen(true);
   };
+
+  const canMonitorDrive = isAuthenticated && currentUserRole !== 'employee' && !isDemoMode;
+  const isTokenExpiringSoon =
+    syncState.isConnected &&
+    Boolean(syncState.spreadsheetId) &&
+    tokenRemainingMs > 0 &&
+    tokenRemainingMs < 5 * 60 * 1000;
+  const hasDriveConnectionIssue =
+    canMonitorDrive &&
+    (!isNetworkOnline ||
+      Boolean(driveConnectionAlert) ||
+      !syncState.isConnected ||
+      !syncState.spreadsheetId ||
+      isTokenExpiringSoon);
+
+  const driveWarningConfig = useMemo(() => {
+    if (!hasDriveConnectionIssue) return null;
+
+    if (!isNetworkOnline) {
+      return {
+        severity: 'critical' as const,
+        icon: 'offline' as const,
+        title: 'Mất kết nối mạng — Đồng bộ Google Drive đang bị gián đoạn',
+        description:
+          'Thiết bị hiện không có kết nối Internet. Mọi dữ liệu bạn chỉnh sửa vẫn được giữ tạm trên trình duyệt; hãy kiểm tra đường truyền mạng và kết nối lại để đồng bộ liên tục.',
+        primaryLabel: 'Thử kết nối lại Google Drive',
+        actionMode: 'reconnect' as const
+      };
+    }
+
+    if (driveConnectionAlert?.type === 'expired' || (!syncState.isConnected && Boolean(syncState.spreadsheetId))) {
+      return {
+        severity: 'critical' as const,
+        icon: 'cloud-off' as const,
+        title: 'Kết nối Google Drive đã hết phiên hoặc bị ngắt',
+        description:
+          driveConnectionAlert?.reason ||
+          'Phiên kết nối tới Google Drive không còn hiệu lực. Vui lòng kết nối lại ngay để dữ liệu chấm công, ăn ca và bảng lương được đồng bộ liên tục.',
+        primaryLabel: 'Kết nối lại Google Drive',
+        actionMode: 'reconnect' as const
+      };
+    }
+
+    if (driveConnectionAlert?.type === 'interrupted') {
+      return {
+        severity: 'critical' as const,
+        icon: 'warning' as const,
+        title: 'Kết nối Google Drive bị gián đoạn trong quá trình đồng bộ',
+        description: driveConnectionAlert.reason,
+        primaryLabel: 'Kết nối lại Google Drive',
+        actionMode: 'reconnect' as const
+      };
+    }
+
+    if (!syncState.isConnected) {
+      return {
+        severity: 'warning' as const,
+        icon: 'cloud-off' as const,
+        title: 'Chưa kết nối tài khoản Google Drive',
+        description:
+          'Phần mềm hiện chưa liên kết với Google Drive. Dữ liệu đang chỉ lưu tạm trên trình duyệt này — hãy kết nối Google Drive để đồng bộ an toàn và liên tục.',
+        primaryLabel: 'Kết nối Google Drive ngay',
+        actionMode: 'reconnect' as const
+      };
+    }
+
+    if (!syncState.spreadsheetId) {
+      return {
+        severity: 'warning' as const,
+        icon: 'link' as const,
+        title: 'Chưa chọn hoặc khởi tạo bảng tính Google Sheets trên Drive',
+        description:
+          'Tài khoản Google đã đăng nhập nhưng chưa liên kết file bảng tính dữ liệu. Hãy mở hộp thoại đồng bộ để chọn hoặc tạo file Google Sheets.',
+        primaryLabel: 'Chọn / Tạo bảng tính Drive',
+        actionMode: 'open-sync' as const
+      };
+    }
+
+    const minsLeft = Math.max(1, Math.ceil(tokenRemainingMs / 60000));
+    return {
+      severity: 'warning' as const,
+      icon: 'warning' as const,
+      title: `Phiên Google Drive sắp hết hạn (còn khoảng ${minsLeft} phút)`,
+      description:
+        'Phiên xác thực Google Drive chuẩn bị hết thời gian hiệu lực. Hãy gia hạn kết nối ngay để tránh gián đoạn khi bạn lưu và đồng bộ dữ liệu.',
+      primaryLabel: 'Gia hạn kết nối Google Drive',
+      actionMode: 'reconnect' as const
+    };
+  }, [
+    hasDriveConnectionIssue,
+    isNetworkOnline,
+    driveConnectionAlert,
+    syncState.isConnected,
+    syncState.spreadsheetId,
+    tokenRemainingMs
+  ]);
 
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans text-slate-800">
@@ -811,6 +1112,99 @@ function PayrollAppContent() {
         />
 
         <main className="flex-1 w-full min-w-0 px-3 sm:px-4 lg:px-6 py-4 space-y-5">
+          {driveWarningConfig && !isDriveBannerDismissed && (
+            <div
+              role="alert"
+              className={`rounded-2xl border p-3.5 sm:p-4 shadow-xs transition-all ${
+                driveWarningConfig.severity === 'critical'
+                  ? 'bg-rose-50 border-rose-300 text-rose-950'
+                  : 'bg-amber-50 border-amber-300 text-amber-950'
+              }`}
+            >
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                      driveWarningConfig.severity === 'critical'
+                        ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                        : 'bg-amber-100 text-amber-700 border border-amber-200'
+                    }`}
+                  >
+                    {driveWarningConfig.icon === 'offline' && <WifiOff className="w-5 h-5" />}
+                    {driveWarningConfig.icon === 'cloud-off' && <CloudOff className="w-5 h-5" />}
+                    {driveWarningConfig.icon === 'link' && <Link2 className="w-5 h-5" />}
+                    {driveWarningConfig.icon === 'warning' && <AlertTriangle className="w-5 h-5" />}
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-sm leading-snug">
+                        {driveWarningConfig.title}
+                      </span>
+                      {syncState.spreadsheetName && (
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-white/80 border border-slate-200 text-slate-700 truncate max-w-[260px]">
+                          File: {syncState.spreadsheetName}
+                        </span>
+                      )}
+                    </div>
+                    <p
+                      className={`text-xs leading-relaxed ${
+                        driveWarningConfig.severity === 'critical' ? 'text-rose-800' : 'text-amber-800'
+                      }`}
+                    >
+                      {driveWarningConfig.description}
+                    </p>
+                    {driveReconnectError && (
+                      <p className="text-xs font-semibold text-rose-700 pt-0.5">
+                        {driveReconnectError}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0 pl-12 lg:pl-0">
+                  <button
+                    type="button"
+                    disabled={isReconnectingDrive}
+                    onClick={() => {
+                      if (driveWarningConfig.actionMode === 'open-sync') {
+                        setIsSyncModalOpen(true);
+                      } else {
+                        handleReconnectGoogleDrive();
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
+                      driveWarningConfig.severity === 'critical'
+                        ? 'bg-rose-600 hover:bg-rose-700'
+                        : 'bg-amber-600 hover:bg-amber-700'
+                    }`}
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isReconnectingDrive ? 'animate-spin' : ''}`} />
+                    <span>{isReconnectingDrive ? 'Đang kết nối...' : driveWarningConfig.primaryLabel}</span>
+                  </button>
+
+                  {driveWarningConfig.actionMode !== 'open-sync' && (
+                    <button
+                      type="button"
+                      onClick={() => setIsSyncModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 transition-colors cursor-pointer"
+                    >
+                      Mở bảng đồng bộ
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setIsDriveBannerDismissed(true)}
+                    title="Thu gọn thông báo này tạm thời"
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-white/70 transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'dashboard' && (
             <DashboardView
               employees={employees}
@@ -943,10 +1337,12 @@ function PayrollAppContent() {
               specialAllowances={specialAllowances}
               employees={employees}
               settings={settings}
+              onUpdateSettings={setSettings}
               onAddAllowance={handleAddAllowance}
               onUpdateAllowance={handleUpdateAllowance}
               onDeleteAllowance={handleDeleteAllowance}
               onBatchAddAllowances={handleBatchAddAllowances}
+              onBatchUpsertAllowances={handleBatchUpsertAllowances}
             />
           )}
 

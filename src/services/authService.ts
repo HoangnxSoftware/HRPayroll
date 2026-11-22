@@ -21,9 +21,61 @@ provider.setCustomParameters({
   prompt: 'select_account'
 });
 
+export const GOOGLE_TOKEN_LIFETIME_MS = 55 * 60 * 1000;
+export const GOOGLE_DRIVE_CONNECTION_LOST_EVENT = 'google-drive-connection-lost';
+
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
+let cachedTokenTimestamp: number | null = null;
 let currentUser: User | null = null;
+
+const clearStoredGoogleToken = () => {
+  cachedAccessToken = null;
+  cachedTokenTimestamp = null;
+  try {
+    localStorage.removeItem('google_access_token');
+    localStorage.removeItem('google_token_time');
+  } catch (_) {}
+};
+
+export const invalidateGoogleToken = (reason?: string) => {
+  clearStoredGoogleToken();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(GOOGLE_DRIVE_CONNECTION_LOST_EVENT, {
+        detail: {
+          type: 'expired',
+          reason: reason || 'Phiên làm việc Google Drive đã hết hạn hoặc bị thu hồi quyền truy cập.'
+        }
+      })
+    );
+  }
+};
+
+export const notifyGoogleNetworkError = (reason?: string) => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(GOOGLE_DRIVE_CONNECTION_LOST_EVENT, {
+        detail: {
+          type: 'interrupted',
+          reason: reason || 'Kết nối tới Google Drive bị gián đoạn hoặc mất mạng.'
+        }
+      })
+    );
+  }
+};
+
+export const getGoogleTokenRemainingMs = (): number => {
+  try {
+    const stored = cachedAccessToken || localStorage.getItem('google_access_token');
+    const ts = cachedTokenTimestamp ?? Number(localStorage.getItem('google_token_time') || 0);
+    if (!stored || !ts) return 0;
+    const remaining = GOOGLE_TOKEN_LIFETIME_MS - (Date.now() - ts);
+    return remaining > 0 ? remaining : 0;
+  } catch (_) {
+    return 0;
+  }
+};
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
@@ -40,7 +92,7 @@ export const initAuth = (
         if (onAuthFailure) onAuthFailure();
       }
     } else {
-      cachedAccessToken = null;
+      clearStoredGoogleToken();
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -54,13 +106,15 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     if (!credential?.accessToken) {
       throw new Error('Không lấy được Access Token từ Google Auth');
     }
+    const now = Date.now();
     cachedAccessToken = credential.accessToken;
+    cachedTokenTimestamp = now;
     currentUser = result.user;
-    
+
     // Lưu trữ token vào localStorage để giữ phiên khi làm việc & đóng mở tab
     try {
       localStorage.setItem('google_access_token', credential.accessToken);
-      localStorage.setItem('google_token_time', String(Date.now()));
+      localStorage.setItem('google_token_time', String(now));
       if (result.user.email) {
         localStorage.setItem('google_user_email', result.user.email);
       }
@@ -78,19 +132,18 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  if (cachedAccessToken) return cachedAccessToken;
   try {
-    const stored = localStorage.getItem('google_access_token');
-    const storedTime = localStorage.getItem('google_token_time');
+    const stored = cachedAccessToken || localStorage.getItem('google_access_token');
+    const storedTime = cachedTokenTimestamp ?? Number(localStorage.getItem('google_token_time') || 0);
     if (stored && storedTime) {
-      const elapsed = Date.now() - Number(storedTime);
+      const elapsed = Date.now() - storedTime;
       // Token Google thường có hạn 1 giờ (cho phép dùng trong 55 phút)
-      if (elapsed < 55 * 60 * 1000) {
+      if (elapsed < GOOGLE_TOKEN_LIFETIME_MS) {
         cachedAccessToken = stored;
+        cachedTokenTimestamp = storedTime;
         return stored;
       } else {
-        localStorage.removeItem('google_access_token');
-        localStorage.removeItem('google_token_time');
+        clearStoredGoogleToken();
       }
     }
   } catch (e) {
@@ -100,16 +153,7 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 export const hasValidGoogleToken = (): boolean => {
-  if (cachedAccessToken) return true;
-  try {
-    const stored = localStorage.getItem('google_access_token');
-    const storedTime = localStorage.getItem('google_token_time');
-    if (stored && storedTime) {
-      const elapsed = Date.now() - Number(storedTime);
-      return elapsed < 55 * 60 * 1000;
-    }
-  } catch (_) {}
-  return false;
+  return getGoogleTokenRemainingMs() > 0;
 };
 
 export const ensureGoogleAccessToken = async (): Promise<string> => {
@@ -128,11 +172,9 @@ export const getCurrentUser = (): User | null => {
 
 export const logout = async () => {
   await signOut(auth);
-  cachedAccessToken = null;
+  clearStoredGoogleToken();
   currentUser = null;
   try {
-    localStorage.removeItem('google_access_token');
-    localStorage.removeItem('google_token_time');
     localStorage.removeItem('google_user_email');
   } catch (_) {}
 };

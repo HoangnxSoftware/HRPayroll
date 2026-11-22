@@ -4,12 +4,104 @@ import {
   Dependent, 
   InsuranceRecord, 
   MealRegistration, 
-  SpecialAllowance, 
+  SpecialAllowance,
+  AllowanceCatalogItem,
   TimekeepingRecord,
   WorkShift,
   AppUser
 } from '../types';
 import { DEFAULT_TAX_BRACKETS, DEFAULT_TAX_EXEMPTION_RULES } from '../utils/payrollCalculator';
+
+export const DEFAULT_ALLOWANCE_CATALOG: AllowanceCatalogItem[] = [
+  {
+    id: 'alw-cat-tn',
+    code: 'PC-TN',
+    name: 'Phụ cấp trách nhiệm quản lý',
+    allowanceType: 'responsibility',
+    defaultAmount: 2000000,
+    isTaxable: true,
+    targetSummary: 'Ban Giám đốc, Kế toán trưởng, Trưởng phòng, Quản đốc',
+    note: 'Tính thuế TNCN theo quy định tiền lương, tiền công',
+    isActive: true
+  },
+  {
+    id: 'alw-cat-cc',
+    code: 'PC-CC',
+    name: 'Phụ cấp chuyên cần',
+    allowanceType: 'attendance',
+    defaultAmount: 500000,
+    isTaxable: true,
+    targetSummary: 'Toàn thể cán bộ nhân viên & công nhân xưởng',
+    note: 'Tính thuế TNCN; áp dụng khi đi làm đủ ngày công chuẩn',
+    isActive: true
+  },
+  {
+    id: 'alw-cat-dh',
+    code: 'PC-DH',
+    name: 'Phụ cấp nặng nhọc, độc hại',
+    allowanceType: 'hazardous',
+    defaultAmount: 800000,
+    isTaxable: false,
+    targetSummary: 'Nhân sự Xưởng Sản xuất & Vận hành',
+    note: 'Miễn thuế TNCN theo danh mục nghề độc hại, nguy hiểm',
+    isActive: true
+  },
+  {
+    id: 'alw-cat-xx',
+    code: 'PC-XX',
+    name: 'Phụ cấp xăng xe đi lại / công tác',
+    allowanceType: 'travel_gas',
+    defaultAmount: 1200000,
+    isTaxable: false,
+    targetSummary: 'Phòng Kinh doanh, Ban Giám đốc & nhân sự di chuyển',
+    note: 'Miễn thuế TNCN theo quy chế khoán công tác phí nội bộ',
+    isActive: true
+  },
+  {
+    id: 'alw-cat-dt',
+    code: 'PC-DT',
+    name: 'Phụ cấp điện thoại liên lạc',
+    allowanceType: 'phone',
+    defaultAmount: 500000,
+    isTaxable: false,
+    targetSummary: 'Quản lý, Kinh doanh, Kỹ thuật trực hệ thống',
+    note: 'Miễn thuế TNCN theo định mức khoán cước liên lạc',
+    isActive: true
+  },
+  {
+    id: 'alw-cat-tp',
+    code: 'PC-TP',
+    name: 'Phụ cấp trang phục (bằng tiền)',
+    allowanceType: 'uniform',
+    defaultAmount: 400000,
+    isTaxable: false,
+    targetSummary: 'Toàn thể nhân viên chính thức',
+    note: 'Miễn thuế TNCN trong hạn mức 5.000.000 đ/năm (~416.667 đ/tháng)',
+    isActive: true
+  },
+  {
+    id: 'alw-cat-kn',
+    code: 'PC-KN',
+    name: 'Phụ cấp kiêm nhiệm',
+    allowanceType: 'concurrent',
+    defaultAmount: 1500000,
+    isTaxable: true,
+    targetSummary: 'Nhân sự kiêm nhiệm chức danh hoặc dự án',
+    note: 'Tính thuế TNCN',
+    isActive: true
+  },
+  {
+    id: 'alw-cat-no',
+    code: 'PC-NO',
+    name: 'Phụ cấp nhà ở / lưu trú',
+    allowanceType: 'housing',
+    defaultAmount: 1500000,
+    isTaxable: true,
+    targetSummary: 'Nhân sự công tác xa hoặc hỗ trợ tiền thuê nhà',
+    note: 'Tính vào thu nhập chịu thuế TNCN theo quy định',
+    isActive: true
+  }
+];
 
 export const initialSettings: SystemSettings = {
   companyName: 'CÔNG TY CỔ PHẦN CÔNG NGHỆ & THƯƠNG MẠI VIỆT THÀNH',
@@ -126,7 +218,9 @@ export const initialSettings: SystemSettings = {
     { id: 'hol-7', date: '2026-05-01', name: 'Quốc tế Lao động', isPaid: true },
     { id: 'hol-8', date: '2026-09-02', name: 'Quốc khánh 2/9', isPaid: true },
     { id: 'hol-9', date: '2026-09-03', name: 'Nghỉ liền kề Quốc khánh', isPaid: true },
-  ]
+  ],
+
+  allowanceCatalog: DEFAULT_ALLOWANCE_CATALOG
 };
 
 // Hàm tự động tạo mã nhân viên: [CV_CODE]-[CCCD_4_CUOI]
@@ -455,7 +549,11 @@ export const initialDependents: Dependent[] = [
     relationship: 'Con đẻ/Con nuôi',
     birthDate: '2016-06-18',
     startDate: '2019-01',
-    deductionAmount: 4400000,
+    deductionAmount: 6200000,
+    deductionHistory: [
+      { id: 'dh-01-1', fromMonth: '2019-01', toMonth: '2025-12', deductionAmount: 4400000, status: 'active', note: 'Mức giảm trừ theo NQ 954/2020/UBTVQH14' },
+      { id: 'dh-01-2', fromMonth: '2026-01', toMonth: '', deductionAmount: 6200000, status: 'active', note: 'Điều chỉnh tăng mức giảm trừ gia cảnh NPT lên 6.200.000 đ/tháng' }
+    ],
     note: 'Con trai đầu'
   },
   {
@@ -466,7 +564,11 @@ export const initialDependents: Dependent[] = [
     relationship: 'Con đẻ/Con nuôi',
     birthDate: '2020-09-02',
     startDate: '2020-10',
-    deductionAmount: 4400000,
+    deductionAmount: 6200000,
+    deductionHistory: [
+      { id: 'dh-02-1', fromMonth: '2020-10', toMonth: '2025-12', deductionAmount: 4400000, status: 'active', note: 'Đăng ký giảm trừ từ tháng sinh' },
+      { id: 'dh-02-2', fromMonth: '2026-01', toMonth: '', deductionAmount: 6200000, status: 'active', note: 'Điều chỉnh tăng mức giảm trừ gia cảnh NPT lên 6.200.000 đ/tháng' }
+    ],
     note: 'Con gái thứ hai'
   },
   {
@@ -477,7 +579,11 @@ export const initialDependents: Dependent[] = [
     relationship: 'Con đẻ/Con nuôi',
     birthDate: '2018-04-12',
     startDate: '2019-03',
-    deductionAmount: 4400000,
+    deductionAmount: 6200000,
+    deductionHistory: [
+      { id: 'dh-03-1', fromMonth: '2019-03', toMonth: '2025-12', deductionAmount: 4400000, status: 'active', note: 'Giai đoạn áp dụng mức 4.400.000 đ/tháng' },
+      { id: 'dh-03-2', fromMonth: '2026-01', toMonth: '', deductionAmount: 6200000, status: 'active', note: 'Áp dụng mức giảm trừ mới 6.200.000 đ/tháng' }
+    ],
     note: 'Con trai'
   },
   {
@@ -488,7 +594,11 @@ export const initialDependents: Dependent[] = [
     relationship: 'Con đẻ/Con nuôi',
     birthDate: '2021-11-28',
     startDate: '2022-01',
-    deductionAmount: 4400000,
+    deductionAmount: 6200000,
+    deductionHistory: [
+      { id: 'dh-04-1', fromMonth: '2022-01', toMonth: '2025-12', deductionAmount: 4400000, status: 'active', note: 'Giai đoạn áp dụng mức 4.400.000 đ/tháng' },
+      { id: 'dh-04-2', fromMonth: '2026-01', toMonth: '', deductionAmount: 6200000, status: 'active', note: 'Áp dụng mức giảm trừ mới 6.200.000 đ/tháng' }
+    ],
     note: 'Con gái'
   },
   {
@@ -499,7 +609,11 @@ export const initialDependents: Dependent[] = [
     relationship: 'Con đẻ/Con nuôi',
     birthDate: '2019-08-10',
     startDate: '2020-02',
-    deductionAmount: 4400000,
+    deductionAmount: 6200000,
+    deductionHistory: [
+      { id: 'dh-05-1', fromMonth: '2020-02', toMonth: '2025-12', deductionAmount: 4400000, status: 'active', note: 'Giai đoạn áp dụng mức 4.400.000 đ/tháng' },
+      { id: 'dh-05-2', fromMonth: '2026-01', toMonth: '', deductionAmount: 6200000, status: 'active', note: 'Áp dụng mức giảm trừ mới 6.200.000 đ/tháng' }
+    ],
     note: 'Con gái'
   }
 ];

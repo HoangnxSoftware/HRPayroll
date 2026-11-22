@@ -158,14 +158,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ? 'bg-red-50 text-red-800 border-red-300 hover:bg-red-100'
                   : syncState.isConnected
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                    : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                    : syncState.spreadsheetId
+                      ? 'bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100'
+                      : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
               }`}
               title={
                 syncState.isDemoMode
                   ? 'Dữ liệu mẫu nội bộ: Đã KHÓA đồng bộ Google Sheets để bảo vệ cơ sở dữ liệu'
                   : syncState.isConnected 
                     ? `Google Sheets: ${syncState.spreadsheetName || syncState.userEmail}` 
-                    : 'Kết nối Google Sheets'
+                    : syncState.spreadsheetId
+                      ? 'Kết nối Google Drive đã mất hoặc hết phiên — Nhấp để kết nối lại'
+                      : 'Chưa kết nối Google Drive — Nhấp để kết nối đồng bộ'
               }
             >
               {syncState.isDemoMode ? <Lock className="w-3.5 h-3.5 text-red-600" /> : <Cloud className="w-3.5 h-3.5" />}
@@ -174,9 +178,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ? 'Dữ liệu mẫu (Khóa sync)' 
                   : syncState.isConnected 
                     ? (syncState.spreadsheetName || 'Google Sheets') 
-                    : 'Lưu Google Drive'}
+                    : syncState.spreadsheetId
+                      ? 'Kết nối lại Drive'
+                      : 'Chưa nối Google Drive'}
               </span>
-              <span className={`w-2 h-2 rounded-full ${syncState.isDemoMode ? 'bg-red-500 ring-2 ring-red-200' : syncState.isConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+              <span className={`w-2 h-2 rounded-full ${
+                syncState.isDemoMode
+                  ? 'bg-red-500 ring-2 ring-red-200'
+                  : syncState.isConnected
+                    ? 'bg-emerald-500'
+                    : syncState.spreadsheetId
+                      ? 'bg-rose-500 animate-pulse'
+                      : 'bg-amber-500'
+              }`}></span>
             </button>
           )}
 

@@ -2,6 +2,7 @@ import {
   SystemSettings,
   Employee,
   Dependent,
+  DependentDeductionPeriod,
   InsuranceRecord,
   InsuranceRatePeriod,
   MealRegistration,
@@ -371,6 +372,171 @@ export const getEffectiveInsuranceSalaryForPeriod = (
   }
 
   return defaultFallback;
+};
+
+export interface EffectiveDependentDeductionResult {
+  isEligible: boolean;
+  amount: number;
+  status: 'active' | 'paused' | 'ended' | 'not_started' | 'expired';
+  reason: string;
+  period?: DependentDeductionPeriod;
+}
+
+/**
+ * Đếm số tháng bao gồm cả 2 đầu mốc [fromMonth, toMonth] (định dạng YYYY-MM).
+ */
+export const countMonthsInPeriod = (
+  fromMonth?: string,
+  toMonth?: string,
+  fallbackEndMonth?: string
+): number => {
+  const startKey = normalizeToMonthKey(fromMonth);
+  const endKey = normalizeToMonthKey(toMonth || fallbackEndMonth);
+  if (!startKey || !endKey) return 0;
+  const [sy, sm] = startKey.split('-').map(Number);
+  const [ey, em] = endKey.split('-').map(Number);
+  if (!sy || !sm || !ey || !em) return 0;
+  const diff = (ey - sy) * 12 + (em - sm) + 1;
+  return diff > 0 ? diff : 0;
+};
+
+/**
+ * Tra cứu trạng thái và mức giảm trừ người phụ thuộc có hiệu lực tại tháng/năm cụ thể,
+ * ưu tiên lấy theo Quá trình tính giảm trừ người phụ thuộc (dep.deductionHistory) qua từng giai đoạn.
+ */
+export const getEffectiveDependentDeductionForMonth = (
+  dep: Dependent,
+  month: number,
+  year: number,
+  settings?: SystemSettings
+): EffectiveDependentDeductionResult => {
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+  const settingsDefaultAmount = settings?.dependentDeduction || 6200000;
+
+  if (dep.deductionHistory && dep.deductionHistory.length > 0) {
+    const sortedAsc = [...dep.deductionHistory].sort((a, b) =>
+      normalizeToMonthKey(a.fromMonth).localeCompare(normalizeToMonthKey(b.fromMonth))
+    );
+    const sortedDesc = [...sortedAsc].reverse();
+
+    const matched = sortedDesc.find(p => {
+      const fromM = normalizeToMonthKey(p.fromMonth);
+      const toM = p.toMonth ? normalizeToMonthKey(p.toMonth) : '';
+      if (!fromM) return false;
+      return monthKey >= fromM && (!toM || monthKey <= toM);
+    });
+
+    if (matched) {
+      const rawAmt = Number(matched.deductionAmount);
+      const effectiveStatus = matched.status || (rawAmt > 0 ? 'active' : 'paused');
+      if (effectiveStatus === 'paused') {
+        return {
+          isEligible: false,
+          amount: 0,
+          status: 'paused',
+          reason: matched.note || 'Tạm ngừng tính giảm trừ trong giai đoạn này',
+          period: matched
+        };
+      }
+      if (effectiveStatus === 'ended' || rawAmt <= 0) {
+        return {
+          isEligible: false,
+          amount: 0,
+          status: 'ended',
+          reason: matched.note || 'Đã kết thúc giảm trừ gia cảnh',
+          period: matched
+        };
+      }
+      return {
+        isEligible: true,
+        amount: rawAmt > 0 ? rawAmt : settingsDefaultAmount,
+        status: 'active',
+        reason: matched.note || 'Đang tính giảm trừ theo giai đoạn đã đăng ký',
+        period: matched
+      };
+    }
+
+    const earliestFrom = normalizeToMonthKey(sortedAsc[0].fromMonth);
+    if (earliestFrom && monthKey < earliestFrom) {
+      return {
+        isEligible: false,
+        amount: 0,
+        status: 'not_started',
+        reason: `Chưa đến tháng bắt đầu giảm trừ (${earliestFrom})`
+      };
+    }
+
+    return {
+      isEligible: false,
+      amount: 0,
+      status: 'expired',
+      reason: 'Không nằm trong giai đoạn giảm trừ nào của quá trình đã đăng ký'
+    };
+  }
+
+  // Trường hợp chưa tạo quá trình nhiều giai đoạn: sử dụng startDate / endDate trên hồ sơ NPT
+  const startM = dep.startDate ? normalizeToMonthKey(dep.startDate) : '';
+  const endM = dep.endDate ? normalizeToMonthKey(dep.endDate) : '';
+
+  if (startM && monthKey < startM) {
+    return {
+      isEligible: false,
+      amount: 0,
+      status: 'not_started',
+      reason: `Chưa đến tháng bắt đầu giảm trừ (${startM})`
+    };
+  }
+
+  if (endM && monthKey > endM) {
+    return {
+      isEligible: false,
+      amount: 0,
+      status: 'expired',
+      reason: `Đã hết thời hạn giảm trừ (${endM})`
+    };
+  }
+
+  const fallbackAmount = settings?.dependentDeduction || dep.deductionAmount || 6200000;
+  return {
+    isEligible: true,
+    amount: fallbackAmount,
+    status: 'active',
+    reason: dep.note || 'Đang áp dụng giảm trừ theo hồ sơ đăng ký'
+  };
+};
+
+/**
+ * Đồng bộ lại startDate, endDate, deductionAmount trên bản ghi Dependent từ danh sách deductionHistory.
+ */
+export const syncDependentSummaryFromHistory = (
+  dep: Dependent,
+  history: DependentDeductionPeriod[],
+  defaultAmount: number = 6200000
+): Dependent => {
+  if (!history || history.length === 0) {
+    return {
+      ...dep,
+      deductionHistory: []
+    };
+  }
+
+  const sorted = [...history].sort((a, b) =>
+    normalizeToMonthKey(a.fromMonth).localeCompare(normalizeToMonthKey(b.fromMonth))
+  );
+  const firstFrom = normalizeToMonthKey(sorted[0].fromMonth) || dep.startDate;
+  const lastPeriod = sorted[sorted.length - 1];
+  const hasOngoing = sorted.some(p => !p.toMonth && (p.status || 'active') === 'active');
+  const latestActive = [...sorted]
+    .reverse()
+    .find(p => (p.status || 'active') === 'active' && (Number(p.deductionAmount) || 0) > 0);
+
+  return {
+    ...dep,
+    startDate: firstFrom,
+    endDate: hasOngoing ? '' : (lastPeriod.toMonth ? normalizeToMonthKey(lastPeriod.toMonth) : ''),
+    deductionAmount: latestActive ? Number(latestActive.deductionAmount) : (Number(lastPeriod.deductionAmount) || defaultAmount),
+    deductionHistory: sorted
+  };
 };
 
 /**
@@ -989,7 +1155,7 @@ export const calculateEmployeePayroll = (
       tradeUnionEmployer: 0,
       totalInsuranceEmployer: 0,
       personalDeduction: 0,
-      dependentCount: dependents.length,
+      dependentCount: dependents.filter(dep => getEffectiveDependentDeductionForMonth(dep, parsedMonth, parsedYear, settings).isEligible).length,
       dependentDeduction: 0,
       otherTaxDeduction: 0,
       otherTaxDeductionNote: '',
@@ -1315,18 +1481,18 @@ export const calculateEmployeePayroll = (
     }
   }
   
-  // 8. Giảm trừ gia cảnh & Thuế TNCN (Bản thân 15.500.000, NPT 6.200.000)
+  // 8. Giảm trừ gia cảnh & Thuế TNCN (Bản thân 15.500.000, NPT theo quá trình hoặc cài đặt hiện hành)
   const currentMonthStr = timekeeping ? String(timekeeping.month) : `${settings?.currentYear || 2026}-${String(settings?.currentMonth || 9).padStart(2, '0')}`;
-  const validDependents = dependents.filter(dep => {
-    if (!dep.startDate) return true;
-    if (dep.startDate > currentMonthStr) return false;
-    if (dep.endDate && dep.endDate < currentMonthStr) return false;
-    return true;
-  });
-  
-  const dependentCount = validDependents.length;
+  const effectiveDependents = dependents
+    .map(dep => ({
+      dep,
+      eff: getEffectiveDependentDeductionForMonth(dep, parsedMonth, parsedYear, settings)
+    }))
+    .filter(item => item.eff.isEligible);
+
+  const dependentCount = effectiveDependents.length;
   const personalDeduction = settings?.personalDeduction || 15500000;
-  const dependentDeduction = dependentCount * (settings?.dependentDeduction || 6200000);
+  const dependentDeduction = effectiveDependents.reduce((sum, item) => sum + item.eff.amount, 0);
   
   // Thu nhập chịu thuế = Gross - Thu nhập miễn thuế
   // Thu nhập miễn thuế bao gồm: OT phần được miễn (otPayTaxExempt), phụ cấp miễn thuế (taxExemptAllowances), tiền ăn ca phần được miễn (mealTaxExempt)

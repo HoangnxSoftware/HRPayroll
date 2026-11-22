@@ -116,6 +116,9 @@ export interface SystemSettings {
   // Mẫu văn bản in ấn (Hợp đồng lao động, Bản cam kết thu nhập)
   documentTemplates?: DocumentTemplatesConfig;
 
+  // Danh mục các khoản phụ cấp đặc thù (dùng để chọn áp dụng hàng loạt)
+  allowanceCatalog?: AllowanceCatalogItem[];
+
   // Cho phép tự động lưu toàn bộ cấu hình khi có thay đổi
   autoSaveSettings?: boolean;
 }
@@ -225,6 +228,17 @@ export interface WorkHistoryItem {
 
 export type RelationshipType = 'Con đẻ/Con nuôi' | 'Vợ/Chồng' | 'Cha mẹ ruột' | 'Cha mẹ vợ/chồng' | 'Người không nơi nương tựa' | 'Khác';
 
+export type DependentDeductionStatus = 'active' | 'paused' | 'ended';
+
+export interface DependentDeductionPeriod {
+  id: string;
+  fromMonth: string; // YYYY-MM (Bắt đầu tính giảm trừ)
+  toMonth?: string; // YYYY-MM (Kết thúc tính giảm trừ, để trống nếu đang áp dụng đến nay)
+  deductionAmount: number; // Mức giảm trừ áp dụng trong giai đoạn (VNĐ/tháng)
+  status?: DependentDeductionStatus; // 'active' (Đang giảm trừ) | 'paused' (Tạm ngừng) | 'ended' (Đã kết thúc)
+  note?: string; // Căn cứ / Lý do thay đổi giảm trừ
+}
+
 export interface Dependent {
   id: string;
   employeeId: string;
@@ -234,7 +248,8 @@ export interface Dependent {
   birthDate: string;
   startDate: string; // Tháng bắt đầu tính giảm trừ (YYYY-MM)
   endDate?: string; // Tháng kết thúc tính giảm trừ (YYYY-MM)
-  deductionAmount: number; // 4,400,000 đ
+  deductionAmount: number; // Mức giảm trừ hiện hành (VNĐ/tháng)
+  deductionHistory?: DependentDeductionPeriod[]; // Quá trình tính giảm trừ người phụ thuộc qua từng giai đoạn
   note?: string;
 }
 
@@ -314,11 +329,24 @@ export type AllowanceType =
   | 'housing' // Phụ cấp nhà ở
   | 'other'; // Khác
 
+export interface AllowanceCatalogItem {
+  id: string;
+  code: string; // Mã khoản phụ cấp (VD: PC-TN, PC-XX...)
+  name: string; // Tên khoản phụ cấp
+  allowanceType: AllowanceType;
+  defaultAmount: number; // Mức phụ cấp mặc định (VNĐ/tháng)
+  isTaxable: boolean; // Có tính thuế TNCN hay Miễn thuế TNCN
+  targetSummary?: string; // Mô tả đối tượng hưởng dự kiến
+  note?: string; // Căn cứ / Ghi chú
+  isActive?: boolean; // Trạng thái sử dụng
+}
+
 export interface SpecialAllowance {
   id: string;
   employeeId: string;
   month: string; // YYYY-MM
   allowanceType?: AllowanceType;
+  catalogId?: string; // Tham chiếu khoản phụ cấp từ danh mục (nếu được áp dụng từ danh mục)
   name: string;
   amount: number;
   isTaxable: boolean; // CHỊU THUẾ TNCN hay KHÔNG CHỊU THUẾ TNCN

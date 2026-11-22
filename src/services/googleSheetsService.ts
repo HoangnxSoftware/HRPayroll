@@ -1,4 +1,4 @@
-import { getAccessToken } from './authService';
+import { getAccessToken, invalidateGoogleToken, notifyGoogleNetworkError } from './authService';
 import { initialSettings } from '../data/initialData';
 import {
   SystemSettings,
@@ -7,6 +7,8 @@ import {
   InsuranceRecord,
   MealRegistration,
   SpecialAllowance,
+  AllowanceCatalogItem,
+  AllowanceType,
   TimekeepingRecord,
   PayrollRecord,
   Department,
@@ -17,7 +19,8 @@ import {
   FixedDaysOffPolicy,
   SalaryCalculationBasis,
   WorkHistoryItem,
-  InsuranceSalaryHistory
+  InsuranceSalaryHistory,
+  DependentDeductionPeriod
 } from '../types';
 import { DEFAULT_TAX_BRACKETS, DEFAULT_TAX_EXEMPTION_RULES } from '../utils/payrollCalculator';
 
@@ -60,8 +63,10 @@ export const SHEET_NAMES = [
   'QuaTrinh_LamViec',
   'QuaTrinh_BHXH',
   'NguoiPhuThuoc',
+  'QuaTrinh_GiamTruNPT',
   'BaoHiemXaHoi',
   'DangKy_AnCa',
+  'DanhMuc_PhuCap',
   'PhuCap_DacThu',
   'Bang_ChamCong',
   'Bang_ThanhToanLuong'
@@ -352,9 +357,11 @@ export const exportDataToGoogleSheets = async (
       } catch (_) {}
 
       if (metaRes.status === 401) {
+        invalidateGoogleToken('Phiên đăng nhập Google Drive đã hết hạn. Vui lòng kết nối lại để tiếp tục đồng bộ.');
         throw new Error('Phiên đăng nhập Google đã hết hạn. Vui lòng nhấn Đăng nhập Google để làm mới quyền.');
       }
       if (metaRes.status === 403) {
+        invalidateGoogleToken('Kết nối Google Drive bị từ chối quyền truy cập (403). Vui lòng kết nối lại.');
         throw new Error(`Google Sheets từ chối quyền truy cập (403): ${errMsg}. Vui lòng kiểm tra quyền chỉnh sửa của tài khoản.`);
       }
       if (metaRes.status === 404) {
@@ -372,9 +379,10 @@ export const exportDataToGoogleSheets = async (
       }
     }
   } catch (err: any) {
-    if (err.message && err.message.includes('Google Sheets')) {
+    if (err.message && err.message.includes('Google')) {
       throw err;
     }
+    notifyGoogleNetworkError('Kết nối tới Google Drive bị gián đoạn hoặc mất mạng.');
     throw new Error(`Lỗi kết nối tới Google Sheets: ${err.message || 'Mất kết nối mạng'}`);
   }
 
@@ -766,6 +774,53 @@ export const exportDataToGoogleSheets = async (
     ])
   ];
 
+  // 3.7b Sheet QuaTrinh_GiamTruNPT (Quá trình tính giảm trừ người phụ thuộc qua các giai đoạn)
+  const dependentHistoryHeader = [
+    'Mã Nhân Viên',
+    'Họ Tên Nhân Viên',
+    'Họ Tên Người Phụ Thuộc',
+    'CCCD / MST NPT',
+    'Từ Tháng (Bắt đầu)',
+    'Đến Tháng (Kết thúc)',
+    'Trạng Thái Giảm Trừ',
+    'Mức Giảm Trừ (VNĐ/Tháng)',
+    'Căn Cứ / Lý Do / Ghi Chú',
+    'ID Giai Đoạn',
+    'ID Người Phụ Thuộc',
+    'ID Nhân Viên'
+  ];
+
+  const empInfoById = new Map(data.employees.map(e => [e.id, e]));
+  const dependentHistoryDataRows: string[][] = [];
+  data.dependents.forEach(dep => {
+    const emp = empInfoById.get(dep.employeeId);
+    const historyList = dep.deductionHistory || [];
+    historyList.forEach(item => {
+      const status = item.status || ((Number(item.deductionAmount) || 0) > 0 ? 'active' : 'paused');
+      const statusLabel =
+        status === 'paused' ? 'Tạm ngừng' : status === 'ended' ? 'Đã kết thúc' : 'Đang tính giảm trừ';
+      dependentHistoryDataRows.push([
+        emp?.employeeCode || '',
+        emp?.fullName || '',
+        dep.fullName,
+        dep.taxCodeOrId || '',
+        item.fromMonth,
+        item.toMonth || 'Đang áp dụng đến nay',
+        statusLabel,
+        String(item.deductionAmount ?? 0),
+        item.note || '',
+        item.id,
+        dep.id,
+        dep.employeeId
+      ]);
+    });
+  });
+
+  const dependentHistoryRows = [
+    dependentHistoryHeader,
+    ...dependentHistoryDataRows
+  ];
+
   // 3.8 Sheet BaoHiemXaHoi
   const insMap = new Map(data.insurances.map(i => [i.employeeId, i]));
   const insuranceHeader = [
@@ -940,6 +995,33 @@ export const exportDataToGoogleSheets = async (
     ...mealRowsData
   ];
 
+  // 3.9b Sheet DanhMuc_PhuCap (Danh sách các khoản phụ cấp đặc thù)
+  const allowanceCatalogHeader = [
+    'Mã Phụ Cấp',
+    'Tên Khoản Phụ Cấp',
+    'Loại Phụ Cấp',
+    'Mức Mặc Định (VNĐ)',
+    'Tính Thuế TNCN?',
+    'Đối Tượng Áp Dụng Dự Kiến',
+    'Trạng Thái',
+    'Ghi Chú',
+    'ID Hệ Thống'
+  ];
+  const allowanceCatalogRows = [
+    allowanceCatalogHeader,
+    ...(data.settings.allowanceCatalog || []).map(cat => [
+      cat.code || '',
+      cat.name || '',
+      cat.allowanceType || 'other',
+      String(cat.defaultAmount || 0),
+      cat.isTaxable ? 'Có chịu thuế TNCN' : 'MIỄN THUẾ TNCN',
+      cat.targetSummary || '',
+      cat.isActive === false ? 'Tạm ngưng' : 'Đang sử dụng',
+      cat.note || '',
+      cat.id
+    ])
+  ];
+
   // 3.10 Sheet PhuCap_DacThu
   const allowanceHeader = [
     'Mã NV',
@@ -960,7 +1042,7 @@ export const exportDataToGoogleSheets = async (
         emp?.employeeCode || sa.employeeId,
         emp?.fullName || '',
         sa.month,
-        sa.allowanceType,
+        sa.allowanceType || 'other',
         sa.name,
         String(sa.amount),
         sa.isTaxable ? 'Có chịu thuế TNCN' : 'MIỄN THUẾ TNCN',
@@ -1232,8 +1314,10 @@ export const exportDataToGoogleSheets = async (
     { range: 'QuaTrinh_LamViec!A1', values: workHistoryRows },
     { range: 'QuaTrinh_BHXH!A1', values: insuranceHistoryRows },
     { range: 'NguoiPhuThuoc!A1', values: dependentRows },
+    { range: 'QuaTrinh_GiamTruNPT!A1', values: dependentHistoryRows },
     { range: 'BaoHiemXaHoi!A1', values: insuranceRows },
     { range: 'DangKy_AnCa!A1', values: mealRows },
+    { range: 'DanhMuc_PhuCap!A1', values: allowanceCatalogRows },
     { range: 'PhuCap_DacThu!A1', values: allowanceRows },
     { range: 'Bang_ChamCong!A1', values: timekeepingRows },
     { range: 'Bang_ThanhToanLuong!A1', values: payrollRows },
@@ -1471,11 +1555,18 @@ export const importFullDataFromGoogleSheets = async (
 
   // Helper fetch values
   const fetchValues = async (range: string): Promise<string[][]> => {
-    const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(range)}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(range)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (networkErr: any) {
+      notifyGoogleNetworkError('Mất kết nối mạng khi đọc dữ liệu từ Google Drive.');
+      throw new Error(`Mất kết nối tới Google Drive: ${networkErr?.message || 'Lỗi mạng'}`);
+    }
     if (res.status === 401 || res.status === 403) {
+      invalidateGoogleToken('Phiên đăng nhập Google Drive đã hết hạn hoặc mất quyền truy cập.');
       throw new Error('Phiên đăng nhập Google đã hết hạn hoặc không có quyền truy cập bảng tính.');
     }
     if (!res.ok) {
@@ -1793,12 +1884,41 @@ export const importFullDataFromGoogleSheets = async (
     console.warn('Lỗi đọc BieuThue_TNCN:', err);
   }
 
+  // 5b. Đọc Danh Mục Các Khoản Phụ Cấp (DanhMuc_PhuCap)
+  try {
+    const catRows = await fetchValues('DanhMuc_PhuCap!A2:I200');
+    if (catRows.length > 0) {
+      const catalog: AllowanceCatalogItem[] = catRows
+        .filter(r => r && (r[0] || r[1]))
+        .map((r, idx) => ({
+          id: r[8] ? String(r[8]).trim() : `alw-cat-imp-${idx + 1}`,
+          code: String(r[0] || `PC-${idx + 1}`).trim().toUpperCase(),
+          name: String(r[1] || '').trim(),
+          allowanceType: (String(r[2] || 'other').trim() || 'other') as AllowanceType,
+          defaultAmount: Number(String(r[3] || '0').replace(/[^\d.-]/g, '')) || 0,
+          isTaxable: !String(r[4] || '').toUpperCase().includes('MIỄN THUẾ'),
+          targetSummary: String(r[5] || '').trim(),
+          isActive: !String(r[6] || '').toLowerCase().includes('ngưng'),
+          note: String(r[7] || '').trim()
+        }))
+        .filter(item => Boolean(item.name));
+      if (catalog.length > 0) {
+        result.settings.allowanceCatalog = catalog;
+      }
+    }
+  } catch (err) {
+    console.warn('Lỗi đọc DanhMuc_PhuCap:', err);
+  }
+
   // Đảm bảo danh mục phòng ban & chức vụ luôn là mảng hợp lệ
   if (!Array.isArray(result.settings.departments) || result.settings.departments.length === 0) {
     result.settings.departments = initialSettings.departments;
   }
   if (!Array.isArray(result.settings.positions) || result.settings.positions.length === 0) {
     result.settings.positions = initialSettings.positions;
+  }
+  if (!Array.isArray(result.settings.allowanceCatalog)) {
+    result.settings.allowanceCatalog = initialSettings.allowanceCatalog || [];
   }
 
   // Tạo map tra cứu phòng ban & chức vụ cho danh sách nhân viên
@@ -2036,6 +2156,71 @@ export const importFullDataFromGoogleSheets = async (
     }
   } catch (err) {
     console.warn('Lỗi đọc NguoiPhuThuoc:', err);
+  }
+
+  // 7b. Đọc Quá Trình Tính Giảm Trừ Người Phụ Thuộc (QuaTrinh_GiamTruNPT)
+  try {
+    const depHistRows = await fetchValues('QuaTrinh_GiamTruNPT!A2:L1000');
+    if (depHistRows.length > 0 && result.dependents && result.dependents.length > 0) {
+      const depHistMap = new Map<string, DependentDeductionPeriod[]>();
+      depHistRows.forEach((r, idx) => {
+        if (!r || (!r[2] && !r[10])) return;
+        const depIdCol = String(r[10] || '').trim();
+        const depNameCol = String(r[2] || '').trim().toLowerCase();
+        const depCccdCol = String(r[3] || '').trim().toLowerCase();
+        const empIdCol = String(r[11] || '').trim();
+        const empCodeCol = String(r[0] || '').trim().toLowerCase();
+
+        const targetDep = result.dependents!.find(d => {
+          if (depIdCol && d.id === depIdCol) return true;
+          const empMatched = (empIdCol && d.employeeId === empIdCol) || (empCodeCol && codeToEmpId.get(empCodeCol) === d.employeeId);
+          if (!empMatched) return false;
+          if (depCccdCol && (d.taxCodeOrId || '').trim().toLowerCase() === depCccdCol) return true;
+          return depNameCol && d.fullName.trim().toLowerCase() === depNameCol;
+        });
+        if (!targetDep) return;
+
+        const fromMonth = String(r[4] || '').trim();
+        if (!fromMonth) return;
+        const toMonthRaw = String(r[5] || '').trim();
+        const toMonth = (!toMonthRaw || toMonthRaw.includes('áp dụng') || toMonthRaw.includes('hiện tại') || toMonthRaw.includes('nay'))
+          ? undefined
+          : toMonthRaw;
+        const statusRaw = String(r[6] || '').toLowerCase();
+        const amount = Number(String(r[7] || '0').replace(/[^\d.-]/g, '')) || 0;
+        const status: DependentDeductionPeriod['status'] =
+          statusRaw.includes('tạm ngừng') || statusRaw.includes('ngừng')
+            ? 'paused'
+            : statusRaw.includes('kết thúc')
+              ? 'ended'
+              : amount > 0
+                ? 'active'
+                : 'paused';
+        const note = String(r[8] || '').trim();
+        const periodId = r[9] ? String(r[9]).trim() : `deph-${targetDep.id}-${idx + 1}`;
+
+        const item: DependentDeductionPeriod = {
+          id: periodId,
+          fromMonth,
+          toMonth,
+          deductionAmount: amount,
+          status,
+          note
+        };
+        if (!depHistMap.has(targetDep.id)) {
+          depHistMap.set(targetDep.id, []);
+        }
+        depHistMap.get(targetDep.id)!.push(item);
+      });
+
+      result.dependents.forEach(dep => {
+        if (depHistMap.has(dep.id)) {
+          dep.deductionHistory = depHistMap.get(dep.id)!.sort((a, b) => (a.fromMonth || '').localeCompare(b.fromMonth || ''));
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Lỗi đọc QuaTrinh_GiamTruNPT:', err);
   }
 
   // 8. Đọc Bảo Hiểm Xã Hội (BaoHiemXaHoi)
