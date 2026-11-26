@@ -1104,6 +1104,36 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
 
                       return (
                         <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
+                          {/* Thay đổi vị trí / Thứ tự */}
+                          <td className="px-2 py-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <span className="font-mono text-[11px] font-bold text-slate-400 w-5 text-right">
+                                #{employees.findIndex(e => e.id === emp.id) + 1}
+                              </span>
+                              {canEditEmployees && onReorderEmployees && (
+                                <div className="flex flex-col gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveEmployee(emp.id, 'up')}
+                                    disabled={employees.findIndex(e => e.id === emp.id) === 0}
+                                    className="p-0.5 text-slate-400 hover:text-purple-700 hover:bg-purple-50 rounded disabled:opacity-20 disabled:hover:bg-transparent cursor-pointer"
+                                    title="Di chuyển lên trên"
+                                  >
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveEmployee(emp.id, 'down')}
+                                    disabled={employees.findIndex(e => e.id === emp.id) === employees.length - 1}
+                                    className="p-0.5 text-slate-400 hover:text-purple-700 hover:bg-purple-50 rounded disabled:opacity-20 disabled:hover:bg-transparent cursor-pointer"
+                                    title="Di chuyển xuống dưới"
+                                  >
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 font-mono font-bold text-slate-900">{emp.employeeCode}</td>
                           <td className="px-4 py-3 font-mono">
                             <div className="font-semibold text-slate-900">{emp.idCardNumber || '—'}</div>
@@ -1125,7 +1155,10 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-slate-600">{depMap.get(emp.departmentId)}</td>
+                          <td className="px-4 py-3 text-slate-600">
+                            <div className="font-medium text-slate-800">{depMap.get(emp.departmentId) || '—'}</div>
+                            <div className="text-[11px] text-slate-400">{posMap.get(emp.positionId) || '—'}</div>
+                          </td>
                           <td className="px-4 py-3 text-center">
                             {isEditing ? (
                               <input
@@ -1685,7 +1718,7 @@ export const InsuranceView: React.FC<InsuranceViewProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {filteredAnnualData.length === 0 ? (
                       <tr>
-                        <td colSpan={18} className="p-8 text-center text-slate-400">
+                        <td colSpan={17} className="p-8 text-center text-slate-400">
                           Không tìm thấy nhân viên nào phù hợp bộ lọc.
                         </td>
                       </tr>
